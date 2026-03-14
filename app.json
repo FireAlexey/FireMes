@@ -26,9 +26,8 @@
     "web": {
   "output": "static",
   "favicon": "./assets/images/favicon.png",
-  "bundler": "metro",
-  "publicPath": "/FireMes/"
-    },
+  "bundler": "metro"
+},
     "plugins": [
       "expo-router",
       [
