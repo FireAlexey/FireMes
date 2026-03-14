@@ -24,8 +24,10 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+  "output": "static",
+  "favicon": "./assets/images/favicon.png",
+  "bundler": "metro",
+  "publicPath": "/FireMes"
     },
     "plugins": [
       "expo-router",
