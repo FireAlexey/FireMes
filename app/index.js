@@ -1,3 +1,5 @@
+import { Audio } from 'expo-av'
+import * as DocumentPicker from 'expo-document-picker'
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth'
 import { get, onChildAdded, onChildChanged, onChildRemoved, onValue, push, ref, set } from 'firebase/database'
 import { useEffect, useRef, useState } from 'react'
@@ -9,8 +11,6 @@ import {
   View
 } from 'react-native'
 import { auth, db } from '../firebase'
-import * as DocumentPicker from 'expo-document-picker'
-import { Audio } from 'expo-av'
 
 const CLOUDINARY_CLOUD = 'dujwxwpxo'
 const CLOUDINARY_PRESET = 'firemes'
@@ -322,7 +322,7 @@ export default function App() {
 
   if (screen === 'auth') return (
     <View style={[s.auth, { backgroundColor: t.authBg }]}>
-      <Text style={[s.title, { color: t.title }]}>🔥 FireMes</Text>
+      <Text style={[s.title, { color: t.title }]}>🔥 FireMes(beta)</Text>
       <TextInput
         style={[s.input, { backgroundColor: t.input, borderColor: t.inputBorder, color: t.inputText }]}
         placeholder="Почта" placeholderTextColor={t.placeholder}
@@ -370,9 +370,6 @@ export default function App() {
           <Text style={{ fontSize: 22, color: 'white' }}>☰</Text>
         </TouchableOpacity>
         <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>Настройки</Text>
-        <TouchableOpacity onPress={() => setIsDark(!isDark)}>
-          <Text style={{ fontSize: 22 }}>{isDark ? '☀️' : '🌙'}</Text>
-        </TouchableOpacity>
       </View>
       <View style={s.settingsProfile}>
         <View style={s.avatarLarge}>
@@ -418,7 +415,7 @@ export default function App() {
         <TouchableOpacity onPress={openSidebar}>
           <Text style={{ fontSize: 22, color: 'white' }}>☰</Text>
         </TouchableOpacity>
-        <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>🔥 FireMes</Text>
+        <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>🔥 FireMes(beta)</Text>
         <TouchableOpacity onPress={() => setAddModal(true)}>
           <Text style={{ fontSize: 24, color: 'white' }}>➕</Text>
         </TouchableOpacity>
