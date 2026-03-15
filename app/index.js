@@ -42,12 +42,15 @@ function getChatId(uid1, uid2) {
   return [uid1, uid2].sort().join('_')
 }
 
-async function uploadToCloudinary(uri, type = 'auto') {
+async function uploadToCloudinary(uriOrFile, type = 'auto') {
   const formData = new FormData()
-  const filename = uri.split('/').pop()
-  formData.append('file', { uri, name: filename, type: 'application/octet-stream' })
+  if (Platform.OS === 'web') {
+    formData.append('file', uriOrFile)
+  } else {
+    const filename = uriOrFile.split('/').pop()
+    formData.append('file', { uri: uriOrFile, name: filename, type: 'application/octet-stream' })
+  }
   formData.append('upload_preset', CLOUDINARY_PRESET)
-  formData.append('resource_type', type)
   const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/auto/upload`, {
     method: 'POST', body: formData
   })
@@ -171,52 +174,102 @@ export default function App() {
 
   // Отправка файла
   async function pickAndSendFile() {
-    const result = await DocumentPicker.getDocumentAsync({ type: '*/*' })
-    if (result.canceled) return
-    const file = result.assets[0]
-    setUploading(true)
-    try {
-      const url = await uploadToCloudinary(file.uri)
-      const chatId = getChatId(user.uid, selectedContact.uid)
-      await push(ref(db, 'chats/' + chatId), {
-        user: userNick, uid: user.uid,
-        text: file.name, fileUrl: url,
-        type: 'file', timestamp: Date.now()
-      })
-    } catch (e) {
-      console.error(e)
+  if (Platform.OS === 'web') {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.onchange = async (e) => {
+      const file = e.target.files[0]
+      if (!file) return
+      setUploading(true)
+      try {
+        const url = await uploadToCloudinary(file)
+        const chatId = getChatId(user.uid, selectedContact.uid)
+        await push(ref(db, 'chats/' + chatId), {
+          user: userNick, uid: user.uid,
+          text: file.name, fileUrl: url,
+          type: 'file', timestamp: Date.now()
+        })
+      } catch (e) { console.error(e) }
+      setUploading(false)
     }
-    setUploading(false)
+    input.click()
+    return
   }
+  const result = await DocumentPicker.getDocumentAsync({ type: '*/*' })
+  if (result.canceled) return
+  const file = result.assets[0]
+  setUploading(true)
+  try {
+    const url = await uploadToCloudinary(file.uri)
+    const chatId = getChatId(user.uid, selectedContact.uid)
+    await push(ref(db, 'chats/' + chatId), {
+      user: userNick, uid: user.uid,
+      text: file.name, fileUrl: url,
+      type: 'file', timestamp: Date.now()
+    })
+  } catch (e) { console.error(e) }
+  setUploading(false)
+}
 
   // Начать запись
   async function startRecording() {
-    await Audio.requestPermissionsAsync()
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true })
-    const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY)
-    setRecording(recording)
-    setIsRecording(true)
+  if (Platform.OS === 'web') {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream)
+      const chunks = []
+      mediaRecorder.ondataavailable = e => chunks.push(e.data)
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' })
+        const file = new File([blob], 'voice.webm', { type: 'audio/webm' })
+        setUploading(true)
+        try {
+          const url = await uploadToCloudinary(file)
+          const chatId = getChatId(user.uid, selectedContact.uid)
+          await push(ref(db, 'chats/' + chatId), {
+            user: userNick, uid: user.uid,
+            audioUrl: url, type: 'audio', timestamp: Date.now()
+          })
+        } catch (e) { console.error(e) }
+        setUploading(false)
+        stream.getTracks().forEach(t => t.stop())
+      }
+      mediaRecorder.start()
+      setRecording(mediaRecorder)
+      setIsRecording(true)
+    } catch (e) { console.error(e) }
+    return
   }
+  await Audio.requestPermissionsAsync()
+  await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true })
+  const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY)
+  setRecording(recording)
+  setIsRecording(true)
+}
 
   // Остановить и отправить
   async function stopAndSendRecording() {
-    setIsRecording(false)
-    await recording.stopAndUnloadAsync()
-    const uri = recording.getURI()
+  setIsRecording(false)
+  if (Platform.OS === 'web') {
+    recording.stop()
     setRecording(null)
-    setUploading(true)
-    try {
-      const url = await uploadToCloudinary(uri, 'video')
-      const chatId = getChatId(user.uid, selectedContact.uid)
-      await push(ref(db, 'chats/' + chatId), {
-        user: userNick, uid: user.uid,
-        audioUrl: url, type: 'audio', timestamp: Date.now()
-      })
-    } catch (e) {
-      console.error(e)
-    }
-    setUploading(false)
+    return
   }
+  await recording.stopAndUnloadAsync()
+  const uri = recording.getURI()
+  setRecording(null)
+  setUploading(true)
+  try {
+    const url = await uploadToCloudinary(uri, 'video')
+    const chatId = getChatId(user.uid, selectedContact.uid)
+    await push(ref(db, 'chats/' + chatId), {
+      user: userNick, uid: user.uid,
+      audioUrl: url, type: 'audio', timestamp: Date.now()
+    })
+  } catch (e) { console.error(e) }
+  setUploading(false)
+}
+
 
   // Воспроизвести голосовое
   async function playAudio(url) {
