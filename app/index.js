@@ -1,5 +1,7 @@
 import { Audio } from 'expo-av'
 import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
+import { Image } from 'expo-image'
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth'
 import { get, onChildAdded, onChildChanged, onChildRemoved, onValue, push, ref, set } from 'firebase/database'
 import { useEffect, useRef, useState } from 'react'
@@ -58,9 +60,30 @@ async function uploadToCloudinary(uriOrFile, type = 'auto') {
   return data.secure_url
 }
 
+// Компонент аватарки
+function Avatar({ url, letter, size = 44, onPress }) {
+  const style = {
+    width: size, height: size, borderRadius: size / 2,
+    backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden'
+  }
+  return (
+    <TouchableOpacity onPress={onPress} disabled={!onPress} style={style}>
+      {url ? (
+        <Image source={{ uri: url }} style={{ width: size, height: size }} contentFit="cover" />
+      ) : (
+        <Text style={{ color: 'white', fontWeight: 'bold', fontSize: size * 0.4 }}>
+          {letter?.toUpperCase()}
+        </Text>
+      )}
+    </TouchableOpacity>
+  )
+}
+
 export default function App() {
   const [user, setUser] = useState(null)
   const [userNick, setUserNick] = useState('')
+  const [userAvatar, setUserAvatar] = useState(null)
   const [isDark, setIsDark] = useState(false)
   const [screen, setScreen] = useState('auth')
 
@@ -82,12 +105,12 @@ export default function App() {
 
   const [newNick, setNewNick] = useState('')
   const [notifications, setNotifications] = useState(true)
+  const [avatarUploading, setAvatarUploading] = useState(false)
 
   const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
   const flatListRef = useRef()
 
-  // Голосовые
   const [recording, setRecording] = useState(null)
   const [isRecording, setIsRecording] = useState(false)
   const [playingSound, setPlayingSound] = useState(null)
@@ -109,9 +132,11 @@ export default function App() {
       if (u) {
         setUser(u)
         const snap = await new Promise(res => onValue(ref(db, 'users/' + u.uid), res, { onlyOnce: true }))
-        const nick = snap.val()?.nickname || 'User'
+        const data = snap.val() || {}
+        const nick = data.nickname || 'User'
         setUserNick(nick)
         setNewNick(nick)
+        setUserAvatar(data.avatar || null)
         setScreen('contacts')
       } else {
         setUser(null)
@@ -127,7 +152,7 @@ export default function App() {
       const uids = Object.keys(data)
       const list = await Promise.all(uids.map(async uid => {
         const s = await get(ref(db, 'users/' + uid))
-        return { uid, nickname: s.val()?.nickname || 'Unknown' }
+        return { uid, nickname: s.val()?.nickname || 'Unknown', avatar: s.val()?.avatar || null }
       }))
       setContacts(list)
     })
@@ -172,107 +197,142 @@ export default function App() {
     setText('')
   }
 
-  // Отправка файла
-  async function pickAndSendFile() {
-  if (Platform.OS === 'web') {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.onchange = async (e) => {
-      const file = e.target.files[0]
-      if (!file) return
-      setUploading(true)
-      try {
-        const url = await uploadToCloudinary(file)
-        const chatId = getChatId(user.uid, selectedContact.uid)
-        await push(ref(db, 'chats/' + chatId), {
-          user: userNick, uid: user.uid,
-          text: file.name, fileUrl: url,
-          type: 'file', timestamp: Date.now()
-        })
-      } catch (e) { console.error(e) }
-      setUploading(false)
+  // Смена аватарки
+  async function changeAvatar() {
+    if (Platform.OS === 'web') {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/*'
+      input.onchange = async (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+        setAvatarUploading(true)
+        try {
+          const url = await uploadToCloudinary(file)
+          await set(ref(db, 'users/' + user.uid + '/avatar'), url)
+          setUserAvatar(url)
+        } catch (e) { console.error(e) }
+        setAvatarUploading(false)
+      }
+      input.click()
+      return
     }
-    input.click()
-    return
-  }
-  const result = await DocumentPicker.getDocumentAsync({ type: '*/*' })
-  if (result.canceled) return
-  const file = result.assets[0]
-  setUploading(true)
-  try {
-    const url = await uploadToCloudinary(file.uri)
-    const chatId = getChatId(user.uid, selectedContact.uid)
-    await push(ref(db, 'chats/' + chatId), {
-      user: userNick, uid: user.uid,
-      text: file.name, fileUrl: url,
-      type: 'file', timestamp: Date.now()
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true, aspect: [1, 1], quality: 0.8
     })
-  } catch (e) { console.error(e) }
-  setUploading(false)
-}
-
-  // Начать запись
-  async function startRecording() {
-  if (Platform.OS === 'web') {
+    if (result.canceled) return
+    setAvatarUploading(true)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
-      const chunks = []
-      mediaRecorder.ondataavailable = e => chunks.push(e.data)
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' })
-        const file = new File([blob], 'voice.webm', { type: 'audio/webm' })
+      const url = await uploadToCloudinary(result.assets[0].uri)
+      await set(ref(db, 'users/' + user.uid + '/avatar'), url)
+      setUserAvatar(url)
+    } catch (e) { console.error(e) }
+    setAvatarUploading(false)
+  }
+
+  async function pickAndSendFile() {
+    if (Platform.OS === 'web') {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.onchange = async (e) => {
+        const file = e.target.files[0]
+        if (!file) return
         setUploading(true)
         try {
           const url = await uploadToCloudinary(file)
           const chatId = getChatId(user.uid, selectedContact.uid)
           await push(ref(db, 'chats/' + chatId), {
             user: userNick, uid: user.uid,
-            audioUrl: url, type: 'audio', timestamp: Date.now()
+            text: file.name, fileUrl: url,
+            type: file.type.startsWith('image/') ? 'image' : 'file',
+            timestamp: Date.now()
           })
         } catch (e) { console.error(e) }
         setUploading(false)
-        stream.getTracks().forEach(t => t.stop())
       }
-      mediaRecorder.start()
-      setRecording(mediaRecorder)
-      setIsRecording(true)
+      input.click()
+      return
+    }
+    const result = await DocumentPicker.getDocumentAsync({ type: '*/*' })
+    if (result.canceled) return
+    const file = result.assets[0]
+    setUploading(true)
+    try {
+      const url = await uploadToCloudinary(file.uri)
+      const chatId = getChatId(user.uid, selectedContact.uid)
+      await push(ref(db, 'chats/' + chatId), {
+        user: userNick, uid: user.uid,
+        text: file.name, fileUrl: url,
+        type: 'file', timestamp: Date.now()
+      })
     } catch (e) { console.error(e) }
-    return
+    setUploading(false)
   }
-  await Audio.requestPermissionsAsync()
-  await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true })
-  const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY)
-  setRecording(recording)
-  setIsRecording(true)
-}
 
-  // Остановить и отправить
+  async function startRecording() {
+    if (Platform.OS === 'web') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const mediaRecorder = new MediaRecorder(stream)
+        const chunks = []
+        mediaRecorder.ondataavailable = e => chunks.push(e.data)
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(chunks, { type: 'audio/webm' })
+          const file = new File([blob], 'voice.webm', { type: 'audio/webm' })
+          setUploading(true)
+          try {
+            const url = await uploadToCloudinary(file)
+            const chatId = getChatId(user.uid, selectedContact.uid)
+            await push(ref(db, 'chats/' + chatId), {
+              user: userNick, uid: user.uid,
+              audioUrl: url, type: 'audio', timestamp: Date.now()
+            })
+          } catch (e) { console.error(e) }
+          setUploading(false)
+          stream.getTracks().forEach(t => t.stop())
+        }
+        mediaRecorder.start()
+        setRecording(mediaRecorder)
+        setIsRecording(true)
+      } catch (e) { console.error(e) }
+      return
+    }
+    await Audio.requestPermissionsAsync()
+    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true })
+    const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY)
+    setRecording(recording)
+    setIsRecording(true)
+  }
+
   async function stopAndSendRecording() {
-  setIsRecording(false)
-  if (Platform.OS === 'web') {
-    recording.stop()
+    setIsRecording(false)
+    if (Platform.OS === 'web') {
+      recording.stop()
+      setRecording(null)
+      return
+    }
+    await recording.stopAndUnloadAsync()
+    const uri = recording.getURI()
     setRecording(null)
-    return
+    setUploading(true)
+    try {
+      const url = await uploadToCloudinary(uri, 'video')
+      const chatId = getChatId(user.uid, selectedContact.uid)
+      await push(ref(db, 'chats/' + chatId), {
+        user: userNick, uid: user.uid,
+        audioUrl: url, type: 'audio', timestamp: Date.now()
+      })
+    } catch (e) { console.error(e) }
+    setUploading(false)
   }
-  await recording.stopAndUnloadAsync()
-  const uri = recording.getURI()
-  setRecording(null)
-  setUploading(true)
-  try {
-    const url = await uploadToCloudinary(uri, 'video')
-    const chatId = getChatId(user.uid, selectedContact.uid)
-    await push(ref(db, 'chats/' + chatId), {
-      user: userNick, uid: user.uid,
-      audioUrl: url, type: 'audio', timestamp: Date.now()
-    })
-  } catch (e) { console.error(e) }
-  setUploading(false)
-}
 
-
-  // Воспроизвести голосовое
   async function playAudio(url) {
+    if (Platform.OS === 'web') {
+      const audio = new window.Audio(url)
+      audio.play()
+      return
+    }
     if (playingSound) {
       await playingSound.unloadAsync()
       setPlayingSound(null)
@@ -282,10 +342,7 @@ export default function App() {
     setPlayingSound(sound)
     await sound.playAsync()
     sound.setOnPlaybackStatusUpdate(status => {
-      if (status.didJustFinish) {
-        sound.unloadAsync()
-        setPlayingSound(null)
-      }
+      if (status.didJustFinish) { sound.unloadAsync(); setPlayingSound(null) }
     })
   }
 
@@ -299,7 +356,7 @@ export default function App() {
       ([uid, val]) => val.nickname?.toLowerCase() === searchNick.trim().toLowerCase() && uid !== user.uid
     )
     if (found) {
-      setSearchResult({ uid: found[0], nickname: found[1].nickname })
+      setSearchResult({ uid: found[0], nickname: found[1].nickname, avatar: found[1].avatar || null })
     } else {
       setSearchError('Пользователь не найден 😔')
     }
@@ -319,7 +376,6 @@ export default function App() {
     setUserNick(newNick.trim())
   }
 
-  // Рендер сообщения
   function renderMessage({ item }) {
     const isMine = user && item.uid === user.uid
     return (
@@ -329,13 +385,17 @@ export default function App() {
       ]}>
         {item.type === 'audio' ? (
           <TouchableOpacity style={s.audioMsg} onPress={() => playAudio(item.audioUrl)}>
-            <Text style={{ fontSize: 24 }}>{playingSound ? '⏹' : '▶️'}</Text>
+            <Text style={{ fontSize: 24 }}>▶</Text>
             <Text style={[s.audioLabel, { color: t.msgText }]}>Голосовое сообщение</Text>
+          </TouchableOpacity>
+        ) : item.type === 'image' ? (
+          <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)}>
+            <Image source={{ uri: item.fileUrl }} style={s.msgImage} contentFit="cover" />
           </TouchableOpacity>
         ) : item.type === 'file' ? (
           <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)}>
             <Text style={{ fontSize: 20 }}>📎</Text>
-            <Text style={[{ color: '#0088cc', textDecorationLine: 'underline' }]}>{item.text}</Text>
+            <Text style={{ color: '#0088cc', textDecorationLine: 'underline' }}>{item.text}</Text>
           </TouchableOpacity>
         ) : (
           <Text style={{ color: t.msgText }}>{item.text}</Text>
@@ -350,9 +410,7 @@ export default function App() {
       <TouchableOpacity style={s.sidebarOverlay} onPress={closeSidebar} activeOpacity={1} />
       <Animated.View style={[s.sidebar, { backgroundColor: t.sidebarBg, transform: [{ translateX: sidebarAnim }] }]}>
         <View style={[s.sidebarProfile, { backgroundColor: t.header }]}>
-          <View style={s.avatarLarge}>
-            <Text style={s.avatarLargeText}>{userNick[0]?.toUpperCase()}</Text>
-          </View>
+          <Avatar url={userAvatar} letter={userNick[0]} size={60} />
           <Text style={s.sidebarNick}>{userNick}</Text>
           <Text style={s.sidebarEmail}>{user?.email}</Text>
         </View>
@@ -424,13 +482,19 @@ export default function App() {
         </TouchableOpacity>
         <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>Настройки</Text>
       </View>
+
       <View style={s.settingsProfile}>
-        <View style={s.avatarLarge}>
-          <Text style={s.avatarLargeText}>{userNick[0]?.toUpperCase()}</Text>
+        <View>
+          <Avatar url={userAvatar} letter={userNick[0]} size={80} onPress={changeAvatar} />
+          <View style={s.avatarEditBadge}>
+            <Text style={{ color: 'white', fontSize: 12 }}>✎</Text>
+          </View>
         </View>
+        {avatarUploading && <Text style={{ color: t.contactSub, marginTop: 8 }}>Загрузка...</Text>}
         <Text style={[s.settingsNick, { color: t.contactText }]}>{userNick}</Text>
         <Text style={[s.settingsEmail, { color: t.contactSub }]}>{user?.email}</Text>
       </View>
+
       <View style={[s.settingsSection, { backgroundColor: t.settingsItem }]}>
         <Text style={[s.settingsSectionTitle, { color: t.contactSub }]}>ПРОФИЛЬ</Text>
         <View style={s.settingsRow}>
@@ -482,9 +546,7 @@ export default function App() {
             style={[s.contact, { backgroundColor: t.contactBg }]}
             onPress={() => { setSelectedContact(item); setScreen('chat') }}
           >
-            <View style={s.avatar}>
-              <Text style={s.avatarText}>{item.nickname[0].toUpperCase()}</Text>
-            </View>
+            <Avatar url={item.avatar} letter={item.nickname[0]} size={44} />
             <View>
               <Text style={[s.contactName, { color: t.contactText }]}>{item.nickname}</Text>
               <Text style={[s.contactSub, { color: t.contactSub }]}>Нажми чтобы написать</Text>
@@ -510,9 +572,7 @@ export default function App() {
             {searchError ? <Text style={s.error}>{searchError}</Text> : null}
             {searchResult ? (
               <View style={s.searchResult}>
-                <View style={s.avatar}>
-                  <Text style={s.avatarText}>{searchResult.nickname[0].toUpperCase()}</Text>
-                </View>
+                <Avatar url={searchResult.avatar} letter={searchResult.nickname[0]} size={44} />
                 <Text style={[s.contactName, { color: t.contactText, flex: 1, marginLeft: 10 }]}>
                   {searchResult.nickname}
                 </Text>
@@ -531,16 +591,13 @@ export default function App() {
     </View>
   )
 
-  // ЭКРАН ЧАТА
   return (
     <KeyboardAvoidingView style={[s.container, { backgroundColor: t.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={[s.header, { backgroundColor: t.header }]}>
         <TouchableOpacity onPress={() => setScreen('contacts')}>
           <Text style={{ fontSize: 22, color: 'white' }}>←</Text>
         </TouchableOpacity>
-        <View style={[s.avatar, { marginLeft: 8 }]}>
-          <Text style={s.avatarText}>{selectedContact?.nickname[0].toUpperCase()}</Text>
-        </View>
+        <Avatar url={selectedContact?.avatar} letter={selectedContact?.nickname[0]} size={36} />
         <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 8 }]}>{selectedContact?.nickname}</Text>
       </View>
 
@@ -592,14 +649,11 @@ const s = StyleSheet.create({
   header: { padding: 16, flexDirection: 'row', alignItems: 'center' },
   headerText: { fontSize: 18, fontWeight: 'bold' },
   contact: { flexDirection: 'row', padding: 14, alignItems: 'center', gap: 12 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center' },
-  avatarText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  avatarLarge: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  avatarLargeText: { color: 'white', fontWeight: 'bold', fontSize: 36 },
   contactName: { fontSize: 16, fontWeight: '500' },
   contactSub: { fontSize: 13, marginTop: 2 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 16 },
   message: { maxWidth: '70%', padding: 10, borderRadius: 12, margin: 4 },
+  msgImage: { width: 200, height: 200, borderRadius: 8 },
   time: { fontSize: 11, opacity: 0.6, marginTop: 2 },
   inputArea: { flexDirection: 'row', padding: 10, gap: 6, alignItems: 'center' },
   iconBtn: { width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
@@ -632,5 +686,9 @@ const s = StyleSheet.create({
   settingsSaveBtn: { backgroundColor: '#0088cc', padding: 10, borderRadius: 8 },
   settingsToggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
   settingsToggleText: { fontSize: 16 },
-  themeToggleAuth: { alignItems: 'center', marginTop: 16 },
+  avatarEditBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#0088cc', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center' },
+  avatarText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
+  avatarLarge: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  avatarLargeText: { color: 'white', fontWeight: 'bold', fontSize: 36 },
 })
