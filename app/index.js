@@ -122,6 +122,8 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false)
   const [playingSound, setPlayingSound] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
+  const recordingTimer = useRef(null)
 
   const t = isDark ? THEMES.dark : THEMES.light
 
@@ -360,6 +362,10 @@ export default function App() {
         mediaRecorder.start()
         setRecording(mediaRecorder)
         setIsRecording(true)
+        setRecordingTime(0)
+        recordingTimer.current = setInterval(() => {
+          setRecordingTime(prev => prev + 1)
+        }, 1000)
       } catch (e) { console.error(e) }
       return
     }
@@ -380,6 +386,8 @@ export default function App() {
       recording.stop()
       setRecording(null)
       return
+      clearInterval(recordingTimer.current)
+      setRecordingTime(0)
     }
     await recording.stopAndUnloadAsync()
     const uri = recording.getURI()
@@ -539,24 +547,45 @@ export default function App() {
         )}
 
         <View style={[s.inputArea, { backgroundColor: t.inputArea }]}>
-          <TouchableOpacity onPress={pickAndSendFile} style={s.iconBtn}>
-            <Text style={{ fontSize: 22 }}>📎</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={isRecording ? stopAndSendRecording : startRecording}
-            style={[s.iconBtn, isRecording && { backgroundColor: 'red', borderRadius: 20 }]}
-          >
-            <Text style={{ fontSize: 22 }}>{isRecording ? '⏹' : '🎤'}</Text>
-          </TouchableOpacity>
-          <TextInput
-            style={[s.msgInput, { borderColor: t.inputBorder, backgroundColor: t.input, color: t.inputText }]}
-            value={text} onChangeText={setText}
-            placeholder="Сообщение..." placeholderTextColor={t.placeholder}
-          />
-          <TouchableOpacity style={s.sendBtn} onPress={sendMessage}>
-            <Text style={{ color: 'white', fontSize: 18 }}>➤</Text>
-          </TouchableOpacity>
-        </View>
+  {isRecording ? (
+    <View style={s.recordingBar}>
+      <View style={[s.recordingDot, { backgroundColor: 'red' }]} />
+      <Text style={{ color: 'red', fontWeight: 'bold', marginRight: 8 }}>
+        {Math.floor(recordingTime / 60)}:{String(recordingTime % 60).padStart(2, '0')}
+      </Text>
+      <View style={s.recordingWave}>
+        {[1,2,3,4,5].map(i => (
+          <View key={i} style={[s.recordingBar2, {
+            height: 8 + (recordingTime % 5) * i * 2,
+            backgroundColor: 'red',
+            opacity: 0.6 + (i * 0.08)
+          }]} />
+        ))}
+      </View>
+      <View style={{ flex: 1 }} />
+      <TouchableOpacity onPress={stopAndSendRecording} style={[s.sendBtn, { backgroundColor: 'red' }]}>
+        <Text style={{ color: 'white', fontSize: 18 }}>⏹</Text>
+      </TouchableOpacity>
+    </View>
+  ) : (
+    <>
+      <TouchableOpacity onPress={pickAndSendFile} style={s.iconBtn}>
+        <Text style={{ fontSize: 22 }}>📎</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={startRecording} style={s.iconBtn}>
+        <Text style={{ fontSize: 22 }}>🎤</Text>
+      </TouchableOpacity>
+      <TextInput
+        style={[s.msgInput, { borderColor: t.inputBorder, backgroundColor: t.input, color: t.inputText }]}
+        value={text} onChangeText={setText}
+        placeholder="Сообщение..." placeholderTextColor={t.placeholder}
+      />
+      <TouchableOpacity style={s.sendBtn} onPress={sendMessage}>
+        <Text style={{ color: 'white', fontSize: 18 }}>➤</Text>
+      </TouchableOpacity>
+    </>
+  )}
+</View>
       </KeyboardAvoidingView>
     )
   }
@@ -855,4 +884,8 @@ const s = StyleSheet.create({
   settingsToggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
   settingsToggleText: { fontSize: 16 },
   avatarEditBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#0088cc', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  recordingBar: { flex: 1, flexDirection: 'row', alignItems: 'center', padding: 10, gap: 8 },
+  recordingDot: { width: 10, height: 10, borderRadius: 5 },
+  recordingWave: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 30 },
+  recordingBar2: { width: 4, borderRadius: 2 },
 })
