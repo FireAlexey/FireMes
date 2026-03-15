@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Animated, FlatList,
   KeyboardAvoidingView, Linking, Modal, Platform,
-  StyleSheet, Switch,
+  ScrollView, StyleSheet, Switch,
   Text, TextInput, TouchableOpacity,
   View
 } from 'react-native'
@@ -44,7 +44,7 @@ function getChatId(uid1, uid2) {
   return [uid1, uid2].sort().join('_')
 }
 
-async function uploadToCloudinary(uriOrFile, type = 'auto') {
+async function uploadToCloudinary(uriOrFile) {
   const formData = new FormData()
   if (Platform.OS === 'web') {
     formData.append('file', uriOrFile)
@@ -60,11 +60,10 @@ async function uploadToCloudinary(uriOrFile, type = 'auto') {
   return data.secure_url
 }
 
-// Компонент аватарки
-function Avatar({ url, letter, size = 44, onPress }) {
+function Avatar({ url, letter, size = 44, onPress, color = '#0088cc' }) {
   const style = {
     width: size, height: size, borderRadius: size / 2,
-    backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: color, justifyContent: 'center', alignItems: 'center',
     overflow: 'hidden'
   }
   return (
@@ -86,6 +85,7 @@ export default function App() {
   const [userAvatar, setUserAvatar] = useState(null)
   const [isDark, setIsDark] = useState(false)
   const [screen, setScreen] = useState('auth')
+  const [tab, setTab] = useState('chats') // 'chats' | 'groups'
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const sidebarAnim = useRef(new Animated.Value(-280)).current
@@ -102,6 +102,13 @@ export default function App() {
   const [searchNick, setSearchNick] = useState('')
   const [searchResult, setSearchResult] = useState(null)
   const [searchError, setSearchError] = useState('')
+
+  // Группы
+  const [groups, setGroups] = useState([])
+  const [selectedGroup, setSelectedGroup] = useState(null)
+  const [createGroupModal, setCreateGroupModal] = useState(false)
+  const [groupName, setGroupName] = useState('')
+  const [groupMembers, setGroupMembers] = useState([])
 
   const [newNick, setNewNick] = useState('')
   const [notifications, setNotifications] = useState(true)
@@ -159,8 +166,22 @@ export default function App() {
     return () => unsub()
   }, [user])
 
+  // Загрузка групп
   useEffect(() => {
-    if (!user || !selectedContact) return
+    if (!user) return
+    const unsub = onValue(ref(db, 'groups'), snap => {
+      const data = snap.val() || {}
+      const list = Object.entries(data)
+        .filter(([, g]) => g.members && g.members[user.uid])
+        .map(([id, g]) => ({ id, ...g }))
+      setGroups(list)
+    })
+    return () => unsub()
+  }, [user])
+
+  // Сообщения личного чата
+  useEffect(() => {
+    if (!user || !selectedContact || screen !== 'chat') return
     setMessages([])
     const chatId = getChatId(user.uid, selectedContact.uid)
     const msgsRef = ref(db, 'chats/' + chatId)
@@ -174,7 +195,24 @@ export default function App() {
       setMessages(prev => prev.filter(m => m.key !== snap.key))
     })
     return () => { unsubAdded(); unsubChanged(); unsubRemoved() }
-  }, [user, selectedContact])
+  }, [user, selectedContact, screen])
+
+  // Сообщения группового чата
+  useEffect(() => {
+    if (!user || !selectedGroup || screen !== 'groupchat') return
+    setMessages([])
+    const msgsRef = ref(db, 'groupchats/' + selectedGroup.id)
+    const unsubAdded = onChildAdded(msgsRef, snap => {
+      setMessages(prev => [...prev, { key: snap.key, ...snap.val() }])
+    })
+    const unsubChanged = onChildChanged(msgsRef, snap => {
+      setMessages(prev => prev.map(m => m.key === snap.key ? { key: snap.key, ...snap.val() } : m))
+    })
+    const unsubRemoved = onChildRemoved(msgsRef, snap => {
+      setMessages(prev => prev.filter(m => m.key !== snap.key))
+    })
+    return () => { unsubAdded(); unsubChanged(); unsubRemoved() }
+  }, [user, selectedGroup, screen])
 
   async function register() {
     if (!email || !nickname || !password) return
@@ -188,16 +226,38 @@ export default function App() {
   }
 
   async function sendMessage() {
-    if (!text.trim() || !selectedContact) return
-    const chatId = getChatId(user.uid, selectedContact.uid)
-    await push(ref(db, 'chats/' + chatId), {
-      user: userNick, uid: user.uid,
-      text: text.trim(), type: 'text', timestamp: Date.now()
-    })
+    if (!text.trim()) return
+    if (screen === 'groupchat' && selectedGroup) {
+      await push(ref(db, 'groupchats/' + selectedGroup.id), {
+        user: userNick, uid: user.uid,
+        text: text.trim(), type: 'text', timestamp: Date.now()
+      })
+    } else if (screen === 'chat' && selectedContact) {
+      const chatId = getChatId(user.uid, selectedContact.uid)
+      await push(ref(db, 'chats/' + chatId), {
+        user: userNick, uid: user.uid,
+        text: text.trim(), type: 'text', timestamp: Date.now()
+      })
+    }
     setText('')
   }
 
-  // Смена аватарки
+  // Создать группу
+  async function createGroup() {
+    if (!groupName.trim()) return
+    const members = { [user.uid]: true }
+    groupMembers.forEach(uid => { members[uid] = true })
+    const newGroup = await push(ref(db, 'groups'), {
+      name: groupName.trim(),
+      createdBy: user.uid,
+      members,
+      createdAt: Date.now()
+    })
+    setCreateGroupModal(false)
+    setGroupName('')
+    setGroupMembers([])
+  }
+
   async function changeAvatar() {
     if (Platform.OS === 'web') {
       const input = document.createElement('input')
@@ -232,6 +292,10 @@ export default function App() {
   }
 
   async function pickAndSendFile() {
+    const chatPath = screen === 'groupchat'
+      ? 'groupchats/' + selectedGroup.id
+      : 'chats/' + getChatId(user.uid, selectedContact.uid)
+
     if (Platform.OS === 'web') {
       const input = document.createElement('input')
       input.type = 'file'
@@ -241,8 +305,7 @@ export default function App() {
         setUploading(true)
         try {
           const url = await uploadToCloudinary(file)
-          const chatId = getChatId(user.uid, selectedContact.uid)
-          await push(ref(db, 'chats/' + chatId), {
+          await push(ref(db, chatPath), {
             user: userNick, uid: user.uid,
             text: file.name, fileUrl: url,
             type: file.type.startsWith('image/') ? 'image' : 'file',
@@ -260,8 +323,7 @@ export default function App() {
     setUploading(true)
     try {
       const url = await uploadToCloudinary(file.uri)
-      const chatId = getChatId(user.uid, selectedContact.uid)
-      await push(ref(db, 'chats/' + chatId), {
+      await push(ref(db, chatPath), {
         user: userNick, uid: user.uid,
         text: file.name, fileUrl: url,
         type: 'file', timestamp: Date.now()
@@ -271,6 +333,10 @@ export default function App() {
   }
 
   async function startRecording() {
+    const chatPath = screen === 'groupchat'
+      ? 'groupchats/' + selectedGroup.id
+      : 'chats/' + getChatId(user.uid, selectedContact.uid)
+
     if (Platform.OS === 'web') {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -283,8 +349,7 @@ export default function App() {
           setUploading(true)
           try {
             const url = await uploadToCloudinary(file)
-            const chatId = getChatId(user.uid, selectedContact.uid)
-            await push(ref(db, 'chats/' + chatId), {
+            await push(ref(db, chatPath), {
               user: userNick, uid: user.uid,
               audioUrl: url, type: 'audio', timestamp: Date.now()
             })
@@ -306,6 +371,10 @@ export default function App() {
   }
 
   async function stopAndSendRecording() {
+    const chatPath = screen === 'groupchat'
+      ? 'groupchats/' + selectedGroup.id
+      : 'chats/' + getChatId(user.uid, selectedContact.uid)
+
     setIsRecording(false)
     if (Platform.OS === 'web') {
       recording.stop()
@@ -317,9 +386,8 @@ export default function App() {
     setRecording(null)
     setUploading(true)
     try {
-      const url = await uploadToCloudinary(uri, 'video')
-      const chatId = getChatId(user.uid, selectedContact.uid)
-      await push(ref(db, 'chats/' + chatId), {
+      const url = await uploadToCloudinary(uri)
+      await push(ref(db, chatPath), {
         user: userNick, uid: user.uid,
         audioUrl: url, type: 'audio', timestamp: Date.now()
       })
@@ -383,10 +451,13 @@ export default function App() {
         isMine ? { backgroundColor: t.msgMine, alignSelf: 'flex-end' }
                : { backgroundColor: t.msgOther, alignSelf: 'flex-start' }
       ]}>
+        {!isMine && screen === 'groupchat' && (
+          <Text style={[s.msgNick, { color: t.nick }]}>{item.user}</Text>
+        )}
         {item.type === 'audio' ? (
           <TouchableOpacity style={s.audioMsg} onPress={() => playAudio(item.audioUrl)}>
-            <Text style={{ fontSize: 24 }}>▶</Text>
-            <Text style={[s.audioLabel, { color: t.msgText }]}>Голосовое сообщение</Text>
+            <Text style={{ fontSize: 20 }}>▶</Text>
+            <Text style={[s.audioLabel, { color: t.msgText }]}>Голосовое</Text>
           </TouchableOpacity>
         ) : item.type === 'image' ? (
           <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)}>
@@ -394,8 +465,7 @@ export default function App() {
           </TouchableOpacity>
         ) : item.type === 'file' ? (
           <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)}>
-            <Text style={{ fontSize: 20 }}>📎</Text>
-            <Text style={{ color: '#0088cc', textDecorationLine: 'underline' }}>{item.text}</Text>
+            <Text style={{ fontSize: 18 }}>📎 <Text style={{ color: '#0088cc', textDecorationLine: 'underline' }}>{item.text}</Text></Text>
           </TouchableOpacity>
         ) : (
           <Text style={{ color: t.msgText }}>{item.text}</Text>
@@ -430,6 +500,66 @@ export default function App() {
       </Animated.View>
     </>
   )
+
+  // Чат (личный или групповой)
+  const ChatScreen = () => {
+    const isGroup = screen === 'groupchat'
+    const title = isGroup ? selectedGroup?.name : selectedContact?.nickname
+    const avatarLetter = isGroup ? selectedGroup?.name[0] : selectedContact?.nickname[0]
+    const avatarUrl = isGroup ? null : selectedContact?.avatar
+    const avatarColor = isGroup ? '#7c3aed' : '#0088cc'
+
+    return (
+      <KeyboardAvoidingView style={[s.container, { backgroundColor: t.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={[s.header, { backgroundColor: t.header }]}>
+          <TouchableOpacity onPress={() => setScreen('contacts')}>
+            <Text style={{ fontSize: 22, color: 'white' }}>←</Text>
+          </TouchableOpacity>
+          <Avatar url={avatarUrl} letter={avatarLetter} size={36} color={avatarColor} />
+          <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 8 }]}>{title}</Text>
+          {isGroup && (
+            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>
+              {selectedGroup && Object.keys(selectedGroup.members || {}).length} участников
+            </Text>
+          )}
+        </View>
+
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={m => m.key}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+          renderItem={renderMessage}
+        />
+
+        {uploading && (
+          <View style={s.uploadingBar}>
+            <Text style={{ color: 'white' }}>⏳ Загрузка...</Text>
+          </View>
+        )}
+
+        <View style={[s.inputArea, { backgroundColor: t.inputArea }]}>
+          <TouchableOpacity onPress={pickAndSendFile} style={s.iconBtn}>
+            <Text style={{ fontSize: 22 }}>📎</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={isRecording ? stopAndSendRecording : startRecording}
+            style={[s.iconBtn, isRecording && { backgroundColor: 'red', borderRadius: 20 }]}
+          >
+            <Text style={{ fontSize: 22 }}>{isRecording ? '⏹' : '🎤'}</Text>
+          </TouchableOpacity>
+          <TextInput
+            style={[s.msgInput, { borderColor: t.inputBorder, backgroundColor: t.input, color: t.inputText }]}
+            value={text} onChangeText={setText}
+            placeholder="Сообщение..." placeholderTextColor={t.placeholder}
+          />
+          <TouchableOpacity style={s.sendBtn} onPress={sendMessage}>
+            <Text style={{ color: 'white', fontSize: 18 }}>➤</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    )
+  }
 
   if (screen === 'auth') return (
     <View style={[s.auth, { backgroundColor: t.authBg }]}>
@@ -482,7 +612,6 @@ export default function App() {
         </TouchableOpacity>
         <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>Настройки</Text>
       </View>
-
       <View style={s.settingsProfile}>
         <View>
           <Avatar url={userAvatar} letter={userNick[0]} size={80} onPress={changeAvatar} />
@@ -494,7 +623,6 @@ export default function App() {
         <Text style={[s.settingsNick, { color: t.contactText }]}>{userNick}</Text>
         <Text style={[s.settingsEmail, { color: t.contactSub }]}>{user?.email}</Text>
       </View>
-
       <View style={[s.settingsSection, { backgroundColor: t.settingsItem }]}>
         <Text style={[s.settingsSectionTitle, { color: t.contactSub }]}>ПРОФИЛЬ</Text>
         <View style={s.settingsRow}>
@@ -526,37 +654,76 @@ export default function App() {
     </View>
   )
 
-  if (screen === 'contacts') return (
+  if (screen === 'chat' || screen === 'groupchat') return <ChatScreen />
+
+  // ЭКРАН КОНТАКТОВ + ГРУПП
+  return (
     <View style={[s.container, { backgroundColor: t.bg }]}>
       <View style={[s.header, { backgroundColor: t.header }]}>
         <TouchableOpacity onPress={openSidebar}>
           <Text style={{ fontSize: 22, color: 'white' }}>☰</Text>
         </TouchableOpacity>
-        <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>🔥 FireMes(beta)</Text>
-        <TouchableOpacity onPress={() => setAddModal(true)}>
+        <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>🔥 FireMes</Text>
+        <TouchableOpacity onPress={() => tab === 'chats' ? setAddModal(true) : setCreateGroupModal(true)}>
           <Text style={{ fontSize: 24, color: 'white' }}>➕</Text>
         </TouchableOpacity>
       </View>
-      <FlatList
-        data={contacts}
-        keyExtractor={c => c.uid}
-        ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.divider }} />}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[s.contact, { backgroundColor: t.contactBg }]}
-            onPress={() => { setSelectedContact(item); setScreen('chat') }}
-          >
-            <Avatar url={item.avatar} letter={item.nickname[0]} size={44} />
-            <View>
-              <Text style={[s.contactName, { color: t.contactText }]}>{item.nickname}</Text>
-              <Text style={[s.contactSub, { color: t.contactSub }]}>Нажми чтобы написать</Text>
-            </View>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={[s.empty, { color: t.contactSub }]}>Нажми ➕ чтобы добавить контакт</Text>
-        }
-      />
+
+      {/* Табы */}
+      <View style={[s.tabs, { backgroundColor: t.header }]}>
+        <TouchableOpacity style={[s.tab, tab === 'chats' && s.tabActive]} onPress={() => setTab('chats')}>
+          <Text style={[s.tabText, { color: tab === 'chats' ? 'white' : 'rgba(255,255,255,0.6)' }]}>Чаты</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.tab, tab === 'groups' && s.tabActive]} onPress={() => setTab('groups')}>
+          <Text style={[s.tabText, { color: tab === 'groups' ? 'white' : 'rgba(255,255,255,0.6)' }]}>Группы</Text>
+        </TouchableOpacity>
+      </View>
+
+      {tab === 'chats' ? (
+        <FlatList
+          data={contacts}
+          keyExtractor={c => c.uid}
+          ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.divider }} />}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[s.contact, { backgroundColor: t.contactBg }]}
+              onPress={() => { setSelectedContact(item); setScreen('chat') }}
+            >
+              <Avatar url={item.avatar} letter={item.nickname[0]} size={44} />
+              <View>
+                <Text style={[s.contactName, { color: t.contactText }]}>{item.nickname}</Text>
+                <Text style={[s.contactSub, { color: t.contactSub }]}>Нажми чтобы написать</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={[s.empty, { color: t.contactSub }]}>Нажми ➕ чтобы добавить контакт</Text>
+          }
+        />
+      ) : (
+        <FlatList
+          data={groups}
+          keyExtractor={g => g.id}
+          ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.divider }} />}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[s.contact, { backgroundColor: t.contactBg }]}
+              onPress={() => { setSelectedGroup(item); setScreen('groupchat') }}
+            >
+              <Avatar letter={item.name[0]} size={44} color='#7c3aed' />
+              <View>
+                <Text style={[s.contactName, { color: t.contactText }]}>{item.name}</Text>
+                <Text style={[s.contactSub, { color: t.contactSub }]}>{Object.keys(item.members || {}).length} участников</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={[s.empty, { color: t.contactSub }]}>Нажми ➕ чтобы создать группу</Text>
+          }
+        />
+      )}
+
+      {/* Модалка добавления контакта */}
       <Modal visible={addModal} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.modal, { backgroundColor: t.modalBg }]}>
@@ -587,54 +754,50 @@ export default function App() {
           </View>
         </View>
       </Modal>
+
+      {/* Модалка создания группы */}
+      <Modal visible={createGroupModal} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modal, { backgroundColor: t.modalBg }]}>
+            <Text style={[s.modalTitle, { color: t.contactText }]}>Создать группу</Text>
+            <TextInput
+              style={[s.input, { backgroundColor: t.input, borderColor: t.inputBorder, color: t.inputText }]}
+              placeholder="Название группы" placeholderTextColor={t.placeholder}
+              value={groupName} onChangeText={setGroupName}
+            />
+            <Text style={[s.settingsSectionTitle, { color: t.contactSub, marginBottom: 8 }]}>ДОБАВИТЬ УЧАСТНИКОВ</Text>
+            <ScrollView style={{ maxHeight: 200 }}>
+              {contacts.map(c => (
+                <TouchableOpacity
+                  key={c.uid}
+                  style={[s.contact, {
+                    backgroundColor: groupMembers.includes(c.uid) ? (isDark ? '#2d1b4e' : '#e8f4ff') : 'transparent',
+                    paddingVertical: 8
+                  }]}
+                  onPress={() => {
+                    setGroupMembers(prev =>
+                      prev.includes(c.uid) ? prev.filter(id => id !== c.uid) : [...prev, c.uid]
+                    )
+                  }}
+                >
+                  <Avatar url={c.avatar} letter={c.nickname[0]} size={36} />
+                  <Text style={[s.contactName, { color: t.contactText, flex: 1, marginLeft: 10 }]}>{c.nickname}</Text>
+                  <Text style={{ fontSize: 18 }}>{groupMembers.includes(c.uid) ? '✓' : ''}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={[s.btn, { marginTop: 12 }]} onPress={createGroup}>
+              <Text style={s.btnText}>Создать</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { setCreateGroupModal(false); setGroupName(''); setGroupMembers([]) }}>
+              <Text style={[s.switchText, { color: t.contactSub, marginTop: 8 }]}>Закрыть</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {sidebarOpen && <Sidebar />}
     </View>
-  )
-
-  return (
-    <KeyboardAvoidingView style={[s.container, { backgroundColor: t.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={[s.header, { backgroundColor: t.header }]}>
-        <TouchableOpacity onPress={() => setScreen('contacts')}>
-          <Text style={{ fontSize: 22, color: 'white' }}>←</Text>
-        </TouchableOpacity>
-        <Avatar url={selectedContact?.avatar} letter={selectedContact?.nickname[0]} size={36} />
-        <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 8 }]}>{selectedContact?.nickname}</Text>
-      </View>
-
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={m => m.key}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
-        renderItem={renderMessage}
-      />
-
-      {uploading && (
-        <View style={s.uploadingBar}>
-          <Text style={{ color: 'white' }}>⏳ Загрузка...</Text>
-        </View>
-      )}
-
-      <View style={[s.inputArea, { backgroundColor: t.inputArea }]}>
-        <TouchableOpacity onPress={pickAndSendFile} style={s.iconBtn}>
-          <Text style={{ fontSize: 22 }}>📎</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={isRecording ? stopAndSendRecording : startRecording}
-          style={[s.iconBtn, isRecording && { backgroundColor: 'red', borderRadius: 20 }]}
-        >
-          <Text style={{ fontSize: 22 }}>{isRecording ? '⏹' : '🎤'}</Text>
-        </TouchableOpacity>
-        <TextInput
-          style={[s.msgInput, { borderColor: t.inputBorder, backgroundColor: t.input, color: t.inputText }]}
-          value={text} onChangeText={setText}
-          placeholder="Сообщение..." placeholderTextColor={t.placeholder}
-        />
-        <TouchableOpacity style={s.sendBtn} onPress={sendMessage}>
-          <Text style={{ color: 'white', fontSize: 18 }}>➤</Text>
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
   )
 }
 
@@ -648,12 +811,17 @@ const s = StyleSheet.create({
   switchText: { textAlign: 'center', marginTop: 8, fontSize: 14 },
   header: { padding: 16, flexDirection: 'row', alignItems: 'center' },
   headerText: { fontSize: 18, fontWeight: 'bold' },
+  tabs: { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 8 },
+  tab: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, marginRight: 8 },
+  tabActive: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  tabText: { fontWeight: '600', fontSize: 14 },
   contact: { flexDirection: 'row', padding: 14, alignItems: 'center', gap: 12 },
   contactName: { fontSize: 16, fontWeight: '500' },
   contactSub: { fontSize: 13, marginTop: 2 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 16 },
   message: { maxWidth: '70%', padding: 10, borderRadius: 12, margin: 4 },
   msgImage: { width: 200, height: 200, borderRadius: 8 },
+  msgNick: { fontWeight: 'bold', fontSize: 12, marginBottom: 4 },
   time: { fontSize: 11, opacity: 0.6, marginTop: 2 },
   inputArea: { flexDirection: 'row', padding: 10, gap: 6, alignItems: 'center' },
   iconBtn: { width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
@@ -687,8 +855,4 @@ const s = StyleSheet.create({
   settingsToggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
   settingsToggleText: { fontSize: 16 },
   avatarEditBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#0088cc', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center' },
-  avatarText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  avatarLarge: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  avatarLargeText: { color: 'white', fontWeight: 'bold', fontSize: 36 },
 })
