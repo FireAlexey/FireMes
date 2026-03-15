@@ -383,12 +383,12 @@ export default function App() {
 
     setIsRecording(false)
     if (Platform.OS === 'web') {
-      recording.stop()
-      setRecording(null)
-      return
-      clearInterval(recordingTimer.current)
-      setRecordingTime(0)
-    }
+    clearInterval(recordingTimer.current)
+    setRecordingTime(0)
+    recording.stop()
+    setRecording(null)
+    return
+  }
     await recording.stopAndUnloadAsync()
     const uri = recording.getURI()
     setRecording(null)
@@ -509,86 +509,7 @@ export default function App() {
     </>
   )
 
-  // Чат (личный или групповой)
-  const ChatScreen = () => {
-    const isGroup = screen === 'groupchat'
-    const title = isGroup ? selectedGroup?.name : selectedContact?.nickname
-    const avatarLetter = isGroup ? selectedGroup?.name[0] : selectedContact?.nickname[0]
-    const avatarUrl = isGroup ? null : selectedContact?.avatar
-    const avatarColor = isGroup ? '#7c3aed' : '#0088cc'
 
-    return (
-      <KeyboardAvoidingView style={[s.container, { backgroundColor: t.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={[s.header, { backgroundColor: t.header }]}>
-          <TouchableOpacity onPress={() => setScreen('contacts')}>
-            <Text style={{ fontSize: 22, color: 'white' }}>←</Text>
-          </TouchableOpacity>
-          <Avatar url={avatarUrl} letter={avatarLetter} size={36} color={avatarColor} />
-          <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 8 }]}>{title}</Text>
-          {isGroup && (
-            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>
-              {selectedGroup && Object.keys(selectedGroup.members || {}).length} участников
-            </Text>
-          )}
-        </View>
-
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={m => m.key}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
-          renderItem={renderMessage}
-        />
-
-        {uploading && (
-          <View style={s.uploadingBar}>
-            <Text style={{ color: 'white' }}>⏳ Загрузка...</Text>
-          </View>
-        )}
-
-        <View style={[s.inputArea, { backgroundColor: t.inputArea }]}>
-  {isRecording ? (
-    <View style={s.recordingBar}>
-      <View style={[s.recordingDot, { backgroundColor: 'red' }]} />
-      <Text style={{ color: 'red', fontWeight: 'bold', marginRight: 8 }}>
-        {Math.floor(recordingTime / 60)}:{String(recordingTime % 60).padStart(2, '0')}
-      </Text>
-      <View style={s.recordingWave}>
-        {[1,2,3,4,5].map(i => (
-          <View key={i} style={[s.recordingBar2, {
-            height: 8 + (recordingTime % 5) * i * 2,
-            backgroundColor: 'red',
-            opacity: 0.6 + (i * 0.08)
-          }]} />
-        ))}
-      </View>
-      <View style={{ flex: 1 }} />
-      <TouchableOpacity onPress={stopAndSendRecording} style={[s.sendBtn, { backgroundColor: 'red' }]}>
-        <Text style={{ color: 'white', fontSize: 18 }}>⏹</Text>
-      </TouchableOpacity>
-    </View>
-  ) : (
-    <>
-      <TouchableOpacity onPress={pickAndSendFile} style={s.iconBtn}>
-        <Text style={{ fontSize: 22 }}>📎</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={startRecording} style={s.iconBtn}>
-        <Text style={{ fontSize: 22 }}>🎤</Text>
-      </TouchableOpacity>
-      <TextInput
-        style={[s.msgInput, { borderColor: t.inputBorder, backgroundColor: t.input, color: t.inputText }]}
-        value={text} onChangeText={setText}
-        placeholder="Сообщение..." placeholderTextColor={t.placeholder}
-      />
-      <TouchableOpacity style={s.sendBtn} onPress={sendMessage}>
-        <Text style={{ color: 'white', fontSize: 18 }}>➤</Text>
-      </TouchableOpacity>
-    </>
-  )}
-</View>
-      </KeyboardAvoidingView>
-    )
-  }
 
   if (screen === 'auth') return (
     <View style={[s.auth, { backgroundColor: t.authBg }]}>
@@ -683,7 +604,75 @@ export default function App() {
     </View>
   )
 
-  if (screen === 'chat' || screen === 'groupchat') return <ChatScreen />
+  if (screen === 'chat' || screen === 'groupchat') {
+  const isGroup = screen === 'groupchat'
+  const title = isGroup ? selectedGroup?.name : selectedContact?.nickname
+  const avatarLetter = isGroup ? selectedGroup?.name[0] : selectedContact?.nickname[0]
+  const avatarUrl = isGroup ? null : selectedContact?.avatar
+  const avatarColor = isGroup ? '#7c3aed' : '#0088cc'
+
+  return (
+    <KeyboardAvoidingView style={[s.container, { backgroundColor: t.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <View style={[s.header, { backgroundColor: t.header }]}>
+        <TouchableOpacity onPress={() => setScreen('contacts')}>
+          <Text style={{ fontSize: 22, color: 'white' }}>←</Text>
+        </TouchableOpacity>
+        <Avatar url={avatarUrl} letter={avatarLetter} size={36} color={avatarColor} />
+        <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 8 }]}>{title}</Text>
+        {isGroup && (
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>
+            {selectedGroup && Object.keys(selectedGroup.members || {}).length} участников
+          </Text>
+        )}
+      </View>
+      <FlatList
+        ref={flatListRef}
+        data={messages}
+        keyExtractor={m => m.key}
+        onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+        renderItem={renderMessage}
+      />
+      {uploading && (
+        <View style={s.uploadingBar}>
+          <Text style={{ color: 'white' }}>⏳ Загрузка...</Text>
+        </View>
+      )}
+      <View style={[s.inputArea, { backgroundColor: t.inputArea }]}>
+        {isRecording ? (
+          <View style={s.recRow}>
+            <View style={s.recDot} />
+            <Text style={s.recTime}>
+              {Math.floor(recordingTime / 60)}:{String(recordingTime % 60).padStart(2, '0')}
+            </Text>
+            <View style={s.recTrack}>
+              <View style={[s.recFill, { width: `${Math.min(recordingTime * 2, 100)}%` }]} />
+            </View>
+            <TouchableOpacity onPress={stopAndSendRecording} style={[s.sendBtn, { backgroundColor: 'red' }]}>
+              <Text style={{ color: 'white', fontSize: 18 }}>⏹</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <TouchableOpacity onPress={pickAndSendFile} style={s.iconBtn}>
+              <Text style={{ fontSize: 22 }}>📎</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={startRecording} style={s.iconBtn}>
+              <Text style={{ fontSize: 22 }}>🎤</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={[s.msgInput, { borderColor: t.inputBorder, backgroundColor: t.input, color: t.inputText }]}
+              value={text} onChangeText={setText}
+              placeholder="Сообщение..." placeholderTextColor={t.placeholder}
+            />
+            <TouchableOpacity style={s.sendBtn} onPress={sendMessage}>
+              <Text style={{ color: 'white', fontSize: 18 }}>➤</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </KeyboardAvoidingView>
+  )
+}
 
   // ЭКРАН КОНТАКТОВ + ГРУПП
   return (
@@ -888,4 +877,9 @@ const s = StyleSheet.create({
   recordingDot: { width: 10, height: 10, borderRadius: 5 },
   recordingWave: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 30 },
   recordingBar2: { width: 4, borderRadius: 2 },
+  recRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, padding: 4 },
+  recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'red' },
+  recTime: { color: 'red', fontWeight: 'bold', fontSize: 14, minWidth: 36 },
+  recTrack: { flex: 1, height: 4, backgroundColor: '#ccc', borderRadius: 2, overflow: 'hidden' },
+  recFill: { height: 4, backgroundColor: 'red', borderRadius: 2 },
 })
