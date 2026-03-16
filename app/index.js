@@ -3,10 +3,10 @@ import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { Image } from 'expo-image'
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth'
-import { get, onChildAdded, onChildChanged, onChildRemoved, onValue, push, ref, set } from 'firebase/database'
+import { get, onChildAdded, onChildChanged, onChildRemoved, onValue, push, ref, remove, set, update } from 'firebase/database'
 import { useEffect, useRef, useState } from 'react'
 import {
-  Animated, FlatList,
+  ActionSheetIOS, Alert, Animated, FlatList,
   KeyboardAvoidingView, Linking, Modal, Platform,
   ScrollView, StyleSheet, Switch,
   Text, TextInput, TouchableOpacity,
@@ -27,7 +27,7 @@ const THEMES = {
     contactText: '#000', contactSub: '#888', divider: '#eee',
     modalBg: 'white', sidebarBg: 'white', sidebarText: '#000',
     sidebarSub: '#888', settingsBg: '#f5f5f5', settingsItem: 'white',
-    previewBg: '#f0f0f0',
+    previewBg: '#f0f0f0', danger: '#ff3b30', adminBadge: '#ff9500',
   },
   dark: {
     bg: '#0d0d1a', header: '#1a1040', headerText: 'white',
@@ -38,7 +38,7 @@ const THEMES = {
     contactText: 'white', contactSub: '#6b5fa0', divider: '#1e1640',
     modalBg: '#1a1040', sidebarBg: '#110e2e', sidebarText: 'white',
     sidebarSub: '#6b5fa0', settingsBg: '#0d0d1a', settingsItem: '#1a1040',
-    previewBg: '#1a1040',
+    previewBg: '#1a1040', danger: '#ff453a', adminBadge: '#ff9f0a',
   }
 }
 
@@ -81,6 +81,23 @@ function Avatar({ url, letter, size = 44, onPress, color = '#0088cc' }) {
   )
 }
 
+// Универсальный алерт с кнопками (web + native)
+function showActionSheet(options, cancelIndex, callback) {
+  if (Platform.OS === 'ios') {
+    ActionSheetIOS.showActionSheetWithOptions(
+      { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: 0 },
+      callback
+    )
+  } else {
+    // для Android/Web используем Alert с кнопками
+    const buttons = options
+      .map((opt, i) => ({ text: opt, onPress: () => callback(i), style: i === 0 ? 'destructive' : 'default' }))
+      .filter((_, i) => i !== cancelIndex)
+    buttons.push({ text: options[cancelIndex], style: 'cancel' })
+    Alert.alert('', '', buttons)
+  }
+}
+
 export default function App() {
   const [user, setUser] = useState(null)
   const [userNick, setUserNick] = useState('')
@@ -109,7 +126,25 @@ export default function App() {
   const [selectedGroup, setSelectedGroup] = useState(null)
   const [createGroupModal, setCreateGroupModal] = useState(false)
   const [groupName, setGroupName] = useState('')
+  const [groupDesc, setGroupDesc] = useState('')
   const [groupMembers, setGroupMembers] = useState([])
+
+  // Редактирование группы
+  const [editGroupModal, setEditGroupModal] = useState(false)
+  const [editGroupName, setEditGroupName] = useState('')
+  const [editGroupDesc, setEditGroupDesc] = useState('')
+  const [editGroupAvatar, setEditGroupAvatar] = useState(null)
+  const [editGroupAvatarUploading, setEditGroupAvatarUploading] = useState(false)
+
+  // Управление участниками группы
+  const [groupMembersModal, setGroupMembersModal] = useState(false)
+  const [addMemberModal, setAddMemberModal] = useState(false)
+  const [addMemberNick, setAddMemberNick] = useState('')
+  const [addMemberResult, setAddMemberResult] = useState(null)
+  const [addMemberError, setAddMemberError] = useState('')
+
+  // Текущие данные группы (realtime)
+  const [currentGroupData, setCurrentGroupData] = useState(null)
 
   const [newNick, setNewNick] = useState('')
   const [notifications, setNotifications] = useState(true)
@@ -119,6 +154,10 @@ export default function App() {
   const [text, setText] = useState('')
   const flatListRef = useRef()
 
+  // Редактирование сообщения
+  const [editingMsg, setEditingMsg] = useState(null) // { key, text }
+  const [editText, setEditText] = useState('')
+
   const [recording, setRecording] = useState(null)
   const [isRecording, setIsRecording] = useState(false)
   const [playingSound, setPlayingSound] = useState(null)
@@ -126,8 +165,7 @@ export default function App() {
   const [recordingTime, setRecordingTime] = useState(0)
   const recordingTimer = useRef(null)
 
-  // Предпросмотр
-  const [preview, setPreview] = useState(null) // { type: 'image'|'file', uri, name, file }
+  const [preview, setPreview] = useState(null)
 
   const t = isDark ? THEMES.dark : THEMES.light
 
@@ -184,6 +222,15 @@ export default function App() {
     return () => unsub()
   }, [user])
 
+  // Подписка на realtime данные текущей группы
+  useEffect(() => {
+    if (!selectedGroup) return
+    const unsub = onValue(ref(db, 'groups/' + selectedGroup.id), snap => {
+      if (snap.val()) setCurrentGroupData({ id: selectedGroup.id, ...snap.val() })
+    })
+    return () => unsub()
+  }, [selectedGroup])
+
   useEffect(() => {
     if (!user || !selectedContact || screen !== 'chat') return
     setMessages([])
@@ -217,6 +264,12 @@ export default function App() {
     return () => { unsubAdded(); unsubChanged(); unsubRemoved() }
   }, [user, selectedGroup, screen])
 
+  // ─── Проверка прав ───
+  function isGroupAdmin() {
+    if (!currentGroupData || !user) return false
+    return currentGroupData.createdBy === user.uid || currentGroupData.admins?.[user.uid]
+  }
+
   async function register() {
     if (!email || !nickname || !password) return
     const u = await createUserWithEmailAndPassword(auth, email, password)
@@ -235,7 +288,6 @@ export default function App() {
   async function sendMessage() {
     if (!chatPath) return
     if (preview) {
-      // Отправляем файл из предпросмотра
       setUploading(true)
       try {
         const url = await uploadToCloudinary(preview.file || preview.uri)
@@ -257,17 +309,223 @@ export default function App() {
     setText('')
   }
 
+  // ─── Редактирование сообщения ───
+  async function saveEditMessage() {
+    if (!editingMsg || !editText.trim() || !chatPath) return
+    await update(ref(db, chatPath + '/' + editingMsg.key), {
+      text: editText.trim(),
+      edited: true
+    })
+    setEditingMsg(null)
+    setEditText('')
+  }
+
+  // ─── Удаление сообщения ───
+  async function deleteMessage(msgKey, msgUid) {
+    if (!chatPath) return
+    const canDelete = msgUid === user.uid || (screen === 'groupchat' && isGroupAdmin())
+    if (!canDelete) return
+    if (Platform.OS === 'web') {
+      if (!window.confirm('Удалить сообщение?')) return
+      await remove(ref(db, chatPath + '/' + msgKey))
+    } else {
+      Alert.alert('Удалить сообщение?', '', [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Удалить', style: 'destructive', onPress: async () => {
+          await remove(ref(db, chatPath + '/' + msgKey))
+        }}
+      ])
+    }
+  }
+
+  // ─── Длинное нажатие на сообщение ───
+  function handleMessageLongPress(item) {
+    const isMine = item.uid === user.uid
+    const canDelete = isMine || (screen === 'groupchat' && isGroupAdmin())
+    const canEdit = isMine && item.type === 'text'
+
+    if (!canEdit && !canDelete) return
+
+    const options = []
+    if (canEdit) options.push('✎ Редактировать')
+    if (canDelete) options.push('🗑 Удалить')
+    options.push('Отмена')
+
+    if (Platform.OS === 'web') {
+      // На вебе показываем простой диалог
+      const choice = window.confirm(
+        (canEdit ? 'OK = Редактировать, Cancel = Удалить' : 'Удалить сообщение?')
+      )
+      if (canEdit && choice) {
+        setEditingMsg(item)
+        setEditText(item.text)
+      } else if (!choice && canDelete) {
+        deleteMessage(item.key, item.uid)
+      }
+      return
+    }
+
+    const cancelIdx = options.length - 1
+    showActionSheet(options, cancelIdx, (idx) => {
+      const label = options[idx]
+      if (label.includes('Редактировать')) {
+        setEditingMsg(item)
+        setEditText(item.text)
+      } else if (label.includes('Удалить')) {
+        deleteMessage(item.key, item.uid)
+      }
+    })
+  }
+
+  // ─── Создание группы ───
   async function createGroup() {
     if (!groupName.trim()) return
     const members = { [user.uid]: true }
     groupMembers.forEach(uid => { members[uid] = true })
     await push(ref(db, 'groups'), {
-      name: groupName.trim(), createdBy: user.uid,
-      members, createdAt: Date.now()
+      name: groupName.trim(),
+      description: groupDesc.trim(),
+      createdBy: user.uid,
+      admins: { [user.uid]: true },
+      members,
+      createdAt: Date.now()
     })
     setCreateGroupModal(false)
     setGroupName('')
+    setGroupDesc('')
     setGroupMembers([])
+  }
+
+  // ─── Редактирование группы ───
+  function openEditGroup() {
+    const g = currentGroupData || selectedGroup
+    setEditGroupName(g?.name || '')
+    setEditGroupDesc(g?.description || '')
+    setEditGroupAvatar(g?.avatar || null)
+    setEditGroupModal(true)
+  }
+
+  async function saveEditGroup() {
+    if (!selectedGroup || !editGroupName.trim()) return
+    await update(ref(db, 'groups/' + selectedGroup.id), {
+      name: editGroupName.trim(),
+      description: editGroupDesc.trim(),
+      ...(editGroupAvatar !== (currentGroupData?.avatar || null) && { avatar: editGroupAvatar })
+    })
+    setEditGroupModal(false)
+  }
+
+  async function pickGroupAvatar() {
+    if (Platform.OS === 'web') {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/*'
+      input.onchange = async (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+        setEditGroupAvatarUploading(true)
+        try {
+          const url = await uploadToCloudinary(file)
+          setEditGroupAvatar(url)
+        } catch (e) { console.error(e) }
+        setEditGroupAvatarUploading(false)
+      }
+      input.click()
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true, aspect: [1, 1], quality: 0.8
+    })
+    if (result.canceled) return
+    setEditGroupAvatarUploading(true)
+    try {
+      const url = await uploadToCloudinary(result.assets[0].uri)
+      setEditGroupAvatar(url)
+    } catch (e) { console.error(e) }
+    setEditGroupAvatarUploading(false)
+  }
+
+  // ─── Участники группы ───
+  async function searchUserForGroup() {
+    setAddMemberError('')
+    setAddMemberResult(null)
+    if (!addMemberNick.trim()) return
+    const snap = await get(ref(db, 'users'))
+    const data = snap.val() || {}
+    const found = Object.entries(data).find(
+      ([uid, val]) => val.nickname?.toLowerCase() === addMemberNick.trim().toLowerCase()
+    )
+    if (found) {
+      const g = currentGroupData || selectedGroup
+      if (g?.members?.[found[0]]) {
+        setAddMemberError('Уже в группе')
+        return
+      }
+      setAddMemberResult({ uid: found[0], nickname: found[1].nickname, avatar: found[1].avatar || null })
+    } else {
+      setAddMemberError('Пользователь не найден 😔')
+    }
+  }
+
+  async function addMemberToGroup() {
+    if (!addMemberResult || !selectedGroup) return
+    await set(ref(db, 'groups/' + selectedGroup.id + '/members/' + addMemberResult.uid), true)
+    setAddMemberNick('')
+    setAddMemberResult(null)
+    setAddMemberError('')
+    setAddMemberModal(false)
+  }
+
+  async function removeMemberFromGroup(uid) {
+    if (!selectedGroup || !isGroupAdmin()) return
+    if (uid === (currentGroupData?.createdBy)) {
+      Alert.alert('Нельзя удалить создателя группы')
+      return
+    }
+    const doRemove = async () => {
+      await remove(ref(db, 'groups/' + selectedGroup.id + '/members/' + uid))
+      await remove(ref(db, 'groups/' + selectedGroup.id + '/admins/' + uid))
+    }
+    if (Platform.OS === 'web') {
+      if (window.confirm('Удалить участника из группы?')) doRemove()
+    } else {
+      Alert.alert('Удалить участника?', '', [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Удалить', style: 'destructive', onPress: doRemove }
+      ])
+    }
+  }
+
+  async function toggleAdmin(uid) {
+    if (!selectedGroup || !isGroupAdmin()) return
+    if (uid === currentGroupData?.createdBy) {
+      Alert.alert('Это создатель группы')
+      return
+    }
+    const isAdmin = currentGroupData?.admins?.[uid]
+    if (isAdmin) {
+      await remove(ref(db, 'groups/' + selectedGroup.id + '/admins/' + uid))
+    } else {
+      await set(ref(db, 'groups/' + selectedGroup.id + '/admins/' + uid), true)
+    }
+  }
+
+  async function leaveGroup() {
+    if (!selectedGroup || !user) return
+    const doLeave = async () => {
+      await remove(ref(db, 'groups/' + selectedGroup.id + '/members/' + user.uid))
+      setScreen('contacts')
+      setSelectedGroup(null)
+    }
+    if (Platform.OS === 'web') {
+      if (window.confirm('Покинуть группу?')) doLeave()
+    } else {
+      Alert.alert('Покинуть группу?', '', [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Выйти', style: 'destructive', onPress: doLeave }
+      ])
+    }
   }
 
   async function changeAvatar() {
@@ -303,7 +561,6 @@ export default function App() {
     setAvatarUploading(false)
   }
 
-  // Выбрать файл → показать предпросмотр
   async function pickFile() {
     if (Platform.OS === 'web') {
       const input = document.createElement('input')
@@ -342,9 +599,7 @@ export default function App() {
         setRecording(mediaRecorder)
         setIsRecording(true)
         setRecordingTime(0)
-        recordingTimer.current = setInterval(() => {
-          setRecordingTime(prev => prev + 1)
-        }, 1000)
+        recordingTimer.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000)
       } catch (e) { console.error(e) }
       return
     }
@@ -354,9 +609,7 @@ export default function App() {
     setRecording(recording)
     setIsRecording(true)
     setRecordingTime(0)
-    recordingTimer.current = setInterval(() => {
-      setRecordingTime(prev => prev + 1)
-    }, 1000)
+    recordingTimer.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000)
   }
 
   async function stopRecording() {
@@ -423,41 +676,54 @@ export default function App() {
     setUserNick(newNick.trim())
   }
 
+  // ─── Рендер сообщения ───
   function renderMessage({ item }) {
     const isMine = user && item.uid === user.uid
+    const canShowActions = isMine || (screen === 'groupchat' && isGroupAdmin())
+
     return (
-      <View style={[s.message,
-        isMine ? { backgroundColor: t.msgMine, alignSelf: 'flex-end' }
-               : { backgroundColor: t.msgOther, alignSelf: 'flex-start' }
-      ]}>
-        {!isMine && screen === 'groupchat' && (
-          <Text style={[s.msgNick, { color: t.nick }]}>{item.user}</Text>
-        )}
-        {item.type === 'audio' ? (
-          <TouchableOpacity style={s.audioMsg} onPress={() => playAudio(item.audioUrl || item.fileUrl)}>
-            <Text style={{ fontSize: 20 }}>▶</Text>
-            <View style={s.audioTrack}>
-              <View style={[s.audioFill, { width: '60%' }]} />
-            </View>
-            <Text style={[s.audioLabel, { color: t.msgText }]}>Голосовое</Text>
-          </TouchableOpacity>
-        ) : item.type === 'image' ? (
-          <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)}>
-            <Image source={{ uri: item.fileUrl }} style={s.msgImage} contentFit="cover" />
-          </TouchableOpacity>
-        ) : item.type === 'file' ? (
-          <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)} style={s.fileMsg}>
-            <Text style={{ fontSize: 22 }}>⎗</Text>
-            <Text style={{ color: '#0088cc', textDecorationLine: 'underline', flex: 1 }}>{item.text}</Text>
-          </TouchableOpacity>
-        ) : (
-          <Text style={{ color: t.msgText }}>{item.text}</Text>
-        )}
-        <Text style={[s.time, { color: t.time }]}>{new Date(item.timestamp).toLocaleTimeString()}</Text>
-      </View>
+      <TouchableOpacity
+        activeOpacity={canShowActions ? 0.7 : 1}
+        onLongPress={() => canShowActions && handleMessageLongPress(item)}
+        delayLongPress={400}
+      >
+        <View style={[s.message,
+          isMine ? { backgroundColor: t.msgMine, alignSelf: 'flex-end' }
+                 : { backgroundColor: t.msgOther, alignSelf: 'flex-start' }
+        ]}>
+          {!isMine && screen === 'groupchat' && (
+            <Text style={[s.msgNick, { color: t.nick }]}>{item.user}</Text>
+          )}
+          {item.type === 'audio' ? (
+            <TouchableOpacity style={s.audioMsg} onPress={() => playAudio(item.audioUrl || item.fileUrl)}>
+              <Text style={{ fontSize: 20 }}>▶</Text>
+              <View style={s.audioTrack}>
+                <View style={[s.audioFill, { width: '60%' }]} />
+              </View>
+              <Text style={[s.audioLabel, { color: t.msgText }]}>Голосовое</Text>
+            </TouchableOpacity>
+          ) : item.type === 'image' ? (
+            <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)}>
+              <Image source={{ uri: item.fileUrl }} style={s.msgImage} contentFit="cover" />
+            </TouchableOpacity>
+          ) : item.type === 'file' ? (
+            <TouchableOpacity onPress={() => Linking.openURL(item.fileUrl)} style={s.fileMsg}>
+              <Text style={{ fontSize: 22 }}>🗎</Text>
+              <Text style={{ color: '#0088cc', textDecorationLine: 'underline', flex: 1 }}>{item.text}</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={{ color: t.msgText }}>{item.text}</Text>
+          )}
+          <View style={s.msgMeta}>
+            {item.edited && <Text style={[s.editedLabel, { color: t.time }]}>изм.</Text>}
+            <Text style={[s.time, { color: t.time }]}>{new Date(item.timestamp).toLocaleTimeString()}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
     )
   }
 
+  // ─── Sidebar ───
   const Sidebar = () => (
     <>
       <TouchableOpacity style={s.sidebarOverlay} onPress={closeSidebar} activeOpacity={1} />
@@ -472,7 +738,7 @@ export default function App() {
           <Text style={[s.sidebarItemText, { color: t.sidebarText }]}>Чаты</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.sidebarItem} onPress={() => { closeSidebar(); setScreen('settings') }}>
-          <Text style={s.sidebarIcon}>✦</Text>
+          <Text style={s.sidebarIcon}>⛭</Text>
           <Text style={[s.sidebarItemText, { color: t.sidebarText }]}>Настройки</Text>
         </TouchableOpacity>
         <View style={[s.sidebarDivider, { backgroundColor: t.divider }]} />
@@ -484,6 +750,7 @@ export default function App() {
     </>
   )
 
+  // ─── Auth ───
   if (screen === 'auth') return (
     <View style={[s.auth, { backgroundColor: t.authBg }]}>
       <Text style={[s.title, { color: t.title }]}>🔥 FireMes</Text>
@@ -527,6 +794,7 @@ export default function App() {
     </View>
   )
 
+  // ─── Settings ───
   if (screen === 'settings') return (
     <View style={[s.container, { backgroundColor: t.settingsBg }]}>
       <View style={[s.header, { backgroundColor: t.header }]}>
@@ -577,27 +845,56 @@ export default function App() {
     </View>
   )
 
+  // ─── Chat / GroupChat ───
   if (screen === 'chat' || screen === 'groupchat') {
     const isGroup = screen === 'groupchat'
-    const title = isGroup ? selectedGroup?.name : selectedContact?.nickname
-    const avatarLetter = isGroup ? selectedGroup?.name[0] : selectedContact?.nickname[0]
-    const avatarUrl = isGroup ? null : selectedContact?.avatar
+    const gData = currentGroupData || selectedGroup
+    const title = isGroup ? gData?.name : selectedContact?.nickname
+    const avatarLetter = (isGroup ? gData?.name : selectedContact?.nickname)?.[0]
+    const avatarUrl = isGroup ? gData?.avatar || null : selectedContact?.avatar
     const avatarColor = isGroup ? '#7c3aed' : '#0088cc'
+    const memberCount = isGroup ? Object.keys(gData?.members || {}).length : 0
+    const amAdmin = isGroup && isGroupAdmin()
 
     return (
       <KeyboardAvoidingView style={[s.container, { backgroundColor: t.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        {/* Header */}
         <View style={[s.header, { backgroundColor: t.header }]}>
-          <TouchableOpacity onPress={() => { setScreen('contacts'); setPreview(null) }}>
+          <TouchableOpacity onPress={() => { setScreen('contacts'); setPreview(null); setEditingMsg(null) }}>
             <Text style={{ fontSize: 22, color: 'white' }}>←</Text>
           </TouchableOpacity>
-          <Avatar url={avatarUrl} letter={avatarLetter} size={36} color={avatarColor} />
-          <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 8 }]}>{title}</Text>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginLeft: 8, gap: 8 }}
+            onPress={() => isGroup && setGroupMembersModal(true)}
+          >
+            <Avatar url={avatarUrl} letter={avatarLetter} size={36} color={avatarColor} />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.headerText, { color: t.headerText, fontSize: 16 }]}>{title}</Text>
+              {isGroup && (
+                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11 }}>
+                  {memberCount} участ. • Нажми для управления
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+          {isGroup && amAdmin && (
+            <TouchableOpacity onPress={openEditGroup} style={{ padding: 6 }}>
+              <Text style={{ fontSize: 20, color: 'white' }}>✎</Text>
+            </TouchableOpacity>
+          )}
           {isGroup && (
-            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>
-              {selectedGroup && Object.keys(selectedGroup.members || {}).length} участ.
-            </Text>
+            <TouchableOpacity onPress={leaveGroup} style={{ padding: 6 }}>
+              <Text style={{ fontSize: 18, color: 'rgba(255,255,255,0.7)' }}>🚪</Text>
+            </TouchableOpacity>
           )}
         </View>
+
+        {/* Описание группы */}
+        {isGroup && gData?.description ? (
+          <View style={[s.groupDescBar, { backgroundColor: isDark ? '#1a1040' : '#e8f4ff' }]}>
+            <Text style={{ color: t.contactSub, fontSize: 12 }} numberOfLines={1}>{gData.description}</Text>
+          </View>
+        ) : null}
 
         <FlatList
           ref={flatListRef}
@@ -613,7 +910,6 @@ export default function App() {
           </View>
         )}
 
-        {/* Предпросмотр */}
         {preview && (
           <View style={[s.previewBox, { backgroundColor: t.previewBg }]}>
             {preview.type === 'image' ? (
@@ -625,7 +921,7 @@ export default function App() {
               </View>
             ) : (
               <View style={s.previewAudio}>
-                <Text style={{ fontSize: 24 }}>⎗</Text>
+                <Text style={{ fontSize: 24 }}>🗎</Text>
                 <Text style={{ color: t.contactText, marginLeft: 8, flex: 1 }} numberOfLines={1}>{preview.name}</Text>
               </View>
             )}
@@ -635,6 +931,7 @@ export default function App() {
           </View>
         )}
 
+        {/* Input area */}
         <View style={[s.inputArea, { backgroundColor: t.inputArea }]}>
           {isRecording ? (
             <View style={s.recRow}>
@@ -649,10 +946,30 @@ export default function App() {
                 <Text style={{ color: 'white', fontSize: 18 }}>⏹</Text>
               </TouchableOpacity>
             </View>
+          ) : editingMsg ? (
+            // Режим редактирования
+            <View style={[s.editRow, { borderColor: t.inputBorder }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.contactSub, fontSize: 11, marginBottom: 2 }}>✎ Редактирование</Text>
+                <TextInput
+                  style={[s.msgInput, { borderColor: t.inputBorder, backgroundColor: t.input, color: t.inputText, flex: 0 }]}
+                  value={editText}
+                  onChangeText={setEditText}
+                  autoFocus
+                  placeholder="Текст сообщения" placeholderTextColor={t.placeholder}
+                />
+              </View>
+              <TouchableOpacity style={[s.sendBtn, { backgroundColor: '#34c759' }]} onPress={saveEditMessage}>
+                <Text style={{ color: 'white', fontSize: 16 }}>✓</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.sendBtn, { backgroundColor: '#888', marginLeft: 4 }]} onPress={() => { setEditingMsg(null); setEditText('') }}>
+                <Text style={{ color: 'white', fontSize: 16 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <>
               <TouchableOpacity onPress={pickFile} style={s.iconBtn}>
-                <Text style={{ fontSize: 22 }}>⎗</Text>
+                <Text style={{ fontSize: 22 }}>🗎</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={startRecording} style={s.iconBtn}>
                 <Text style={{ fontSize: 22 }}>◉</Text>
@@ -671,10 +988,128 @@ export default function App() {
             </>
           )}
         </View>
+
+        {/* ── Модал: Участники группы ── */}
+        <Modal visible={groupMembersModal} transparent animationType="slide">
+          <View style={s.modalOverlay}>
+            <View style={[s.modal, { backgroundColor: t.modalBg, maxHeight: '80%' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={[s.modalTitle, { color: t.contactText, flex: 1, marginBottom: 0 }]}>Участники</Text>
+                {amAdmin && (
+                  <TouchableOpacity
+                    style={[s.btn, { paddingHorizontal: 14, paddingVertical: 8, marginBottom: 0 }]}
+                    onPress={() => { setGroupMembersModal(false); setAddMemberModal(true) }}
+                  >
+                    <Text style={s.btnText}>+ Добавить</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <ScrollView>
+                {Object.keys(gData?.members || {}).map(uid => {
+                  const isOwner = uid === gData?.createdBy
+                  const isAdminMember = gData?.admins?.[uid]
+                  return (
+                    <MemberRow
+                      key={uid}
+                      uid={uid}
+                      t={t}
+                      isOwner={isOwner}
+                      isAdmin={isAdminMember}
+                      isSelf={uid === user?.uid}
+                      amAdmin={amAdmin}
+                      onToggleAdmin={() => toggleAdmin(uid)}
+                      onRemove={() => removeMemberFromGroup(uid)}
+                    />
+                  )
+                })}
+              </ScrollView>
+              <TouchableOpacity onPress={() => setGroupMembersModal(false)} style={{ marginTop: 12 }}>
+                <Text style={[s.switchText, { color: t.contactSub }]}>Закрыть</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ── Модал: Добавить участника ── */}
+        <Modal visible={addMemberModal} transparent animationType="slide">
+          <View style={s.modalOverlay}>
+            <View style={[s.modal, { backgroundColor: t.modalBg }]}>
+              <Text style={[s.modalTitle, { color: t.contactText }]}>Добавить участника</Text>
+              <TextInput
+                style={[s.input, { backgroundColor: t.input, borderColor: t.inputBorder, color: t.inputText }]}
+                placeholder="Никнейм" placeholderTextColor={t.placeholder}
+                value={addMemberNick} onChangeText={setAddMemberNick}
+              />
+              <TouchableOpacity style={s.btn} onPress={searchUserForGroup}>
+                <Text style={s.btnText}>Найти</Text>
+              </TouchableOpacity>
+              {addMemberError ? <Text style={s.error}>{addMemberError}</Text> : null}
+              {addMemberResult ? (
+                <View style={s.searchResult}>
+                  <Avatar url={addMemberResult.avatar} letter={addMemberResult.nickname[0]} size={44} />
+                  <Text style={[s.contactName, { color: t.contactText, flex: 1, marginLeft: 10 }]}>
+                    {addMemberResult.nickname}
+                  </Text>
+                  <TouchableOpacity style={[s.btn, { paddingHorizontal: 16 }]} onPress={addMemberToGroup}>
+                    <Text style={s.btnText}>Добавить</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+              <TouchableOpacity onPress={() => { setAddMemberModal(false); setAddMemberNick(''); setAddMemberResult(null); setAddMemberError('') }}>
+                <Text style={[s.switchText, { color: t.contactSub, marginTop: 12 }]}>Закрыть</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ── Модал: Редактирование группы ── */}
+        <Modal visible={editGroupModal} transparent animationType="slide">
+          <View style={s.modalOverlay}>
+            <View style={[s.modal, { backgroundColor: t.modalBg }]}>
+              <Text style={[s.modalTitle, { color: t.contactText }]}>Редактировать группу</Text>
+
+              {/* Аватарка группы */}
+              <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                <TouchableOpacity onPress={pickGroupAvatar}>
+                  <Avatar
+                    url={editGroupAvatar}
+                    letter={editGroupName[0]}
+                    size={72}
+                    color='#7c3aed'
+                  />
+                  <View style={[s.avatarEditBadge, { backgroundColor: '#7c3aed' }]}>
+                    <Text style={{ color: 'white', fontSize: 12 }}>✎</Text>
+                  </View>
+                </TouchableOpacity>
+                {editGroupAvatarUploading && <Text style={{ color: t.contactSub, marginTop: 4, fontSize: 12 }}>Загрузка...</Text>}
+              </View>
+
+              <TextInput
+                style={[s.input, { backgroundColor: t.input, borderColor: t.inputBorder, color: t.inputText }]}
+                placeholder="Название группы" placeholderTextColor={t.placeholder}
+                value={editGroupName} onChangeText={setEditGroupName}
+              />
+              <TextInput
+                style={[s.input, { backgroundColor: t.input, borderColor: t.inputBorder, color: t.inputText, minHeight: 70 }]}
+                placeholder="Описание группы..." placeholderTextColor={t.placeholder}
+                value={editGroupDesc} onChangeText={setEditGroupDesc}
+                multiline numberOfLines={3}
+              />
+              <TouchableOpacity style={[s.btn, { marginTop: 4 }]} onPress={saveEditGroup}>
+                <Text style={s.btnText}>Сохранить</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setEditGroupModal(false)}>
+                <Text style={[s.switchText, { color: t.contactSub, marginTop: 8 }]}>Закрыть</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
       </KeyboardAvoidingView>
     )
   }
 
+  // ─── Contacts / Groups list ───
   return (
     <View style={[s.container, { backgroundColor: t.bg }]}>
       <View style={[s.header, { backgroundColor: t.header }]}>
@@ -683,16 +1118,16 @@ export default function App() {
         </TouchableOpacity>
         <Text style={[s.headerText, { color: t.headerText, flex: 1, marginLeft: 12 }]}>🔥 FireMes</Text>
         <TouchableOpacity onPress={() => tab === 'chats' ? setAddModal(true) : setCreateGroupModal(true)}>
-          <Text style={{ fontSize: 24, color: 'white' }}>✦</Text>
+          <Text style={{ fontSize: 24, color: 'white' }}>+</Text>
         </TouchableOpacity>
       </View>
 
       <View style={[s.tabs, { backgroundColor: t.header }]}>
         <TouchableOpacity style={[s.tab, tab === 'chats' && s.tabActive]} onPress={() => setTab('chats')}>
-          <Text style={[s.tabText, { color: tab === 'chats' ? 'white' : 'rgba(255,255,255,0.6)' }]}>⌂ Чаты</Text>
+          <Text style={[s.tabText, { color: tab === 'chats' ? 'white' : 'rgba(255,255,255,0.6)' }]}>Чаты</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.tab, tab === 'groups' && s.tabActive]} onPress={() => setTab('groups')}>
-          <Text style={[s.tabText, { color: tab === 'groups' ? 'white' : 'rgba(255,255,255,0.6)' }]}>◈ Группы</Text>
+          <Text style={[s.tabText, { color: tab === 'groups' ? 'white' : 'rgba(255,255,255,0.6)' }]}>Группы</Text>
         </TouchableOpacity>
       </View>
 
@@ -714,7 +1149,7 @@ export default function App() {
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            <Text style={[s.empty, { color: t.contactSub }]}>Нажми ✦ чтобы добавить контакт</Text>
+            <Text style={[s.empty, { color: t.contactSub }]}>Нажми + чтобы добавить контакт</Text>
           }
         />
       ) : (
@@ -725,21 +1160,31 @@ export default function App() {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={[s.contact, { backgroundColor: t.contactBg }]}
-              onPress={() => { setSelectedGroup(item); setScreen('groupchat') }}
+              onPress={() => { setSelectedGroup(item); setCurrentGroupData(item); setScreen('groupchat') }}
             >
-              <Avatar letter={item.name[0]} size={44} color='#7c3aed' />
-              <View>
+              <Avatar url={item.avatar || null} letter={item.name[0]} size={44} color='#7c3aed' />
+              <View style={{ flex: 1 }}>
                 <Text style={[s.contactName, { color: t.contactText }]}>{item.name}</Text>
-                <Text style={[s.contactSub, { color: t.contactSub }]}>{Object.keys(item.members || {}).length} участников</Text>
+                {item.description ? (
+                  <Text style={[s.contactSub, { color: t.contactSub }]} numberOfLines={1}>{item.description}</Text>
+                ) : (
+                  <Text style={[s.contactSub, { color: t.contactSub }]}>{Object.keys(item.members || {}).length} участников</Text>
+                )}
               </View>
+              {item.admins?.[user?.uid] && (
+                <View style={[s.adminBadge, { backgroundColor: t.adminBadge }]}>
+                  <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>ADMIN</Text>
+                </View>
+              )}
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            <Text style={[s.empty, { color: t.contactSub }]}>Нажми ✦ чтобы создать группу</Text>
+            <Text style={[s.empty, { color: t.contactSub }]}>Нажми + чтобы создать группу</Text>
           }
         />
       )}
 
+      {/* Модал: Добавить контакт */}
       <Modal visible={addModal} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.modal, { backgroundColor: t.modalBg }]}>
@@ -771,6 +1216,7 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Модал: Создать группу */}
       <Modal visible={createGroupModal} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.modal, { backgroundColor: t.modalBg }]}>
@@ -779,6 +1225,11 @@ export default function App() {
               style={[s.input, { backgroundColor: t.input, borderColor: t.inputBorder, color: t.inputText }]}
               placeholder="Название группы" placeholderTextColor={t.placeholder}
               value={groupName} onChangeText={setGroupName}
+            />
+            <TextInput
+              style={[s.input, { backgroundColor: t.input, borderColor: t.inputBorder, color: t.inputText }]}
+              placeholder="Описание группы (необязательно)" placeholderTextColor={t.placeholder}
+              value={groupDesc} onChangeText={setGroupDesc}
             />
             <Text style={[s.settingsSectionTitle, { color: t.contactSub, marginBottom: 8 }]}>УЧАСТНИКИ</Text>
             <ScrollView style={{ maxHeight: 200 }}>
@@ -804,7 +1255,7 @@ export default function App() {
             <TouchableOpacity style={[s.btn, { marginTop: 12 }]} onPress={createGroup}>
               <Text style={s.btnText}>Создать</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { setCreateGroupModal(false); setGroupName(''); setGroupMembers([]) }}>
+            <TouchableOpacity onPress={() => { setCreateGroupModal(false); setGroupName(''); setGroupDesc(''); setGroupMembers([]) }}>
               <Text style={[s.switchText, { color: t.contactSub, marginTop: 8 }]}>Закрыть</Text>
             </TouchableOpacity>
           </View>
@@ -812,6 +1263,47 @@ export default function App() {
       </Modal>
 
       {sidebarOpen && <Sidebar />}
+    </View>
+  )
+}
+
+// ─── Компонент строки участника ───
+function MemberRow({ uid, t, isOwner, isAdmin, isSelf, amAdmin, onToggleAdmin, onRemove }) {
+  const [info, setInfo] = useState(null)
+
+  useEffect(() => {
+    get(ref(db, 'users/' + uid)).then(snap => {
+      if (snap.val()) setInfo(snap.val())
+    })
+  }, [uid])
+
+  if (!info) return null
+
+  return (
+    <View style={[s.memberRow, { borderBottomColor: t.divider }]}>
+      <Avatar url={info.avatar || null} letter={info.nickname?.[0]} size={40} />
+      <View style={{ flex: 1, marginLeft: 10 }}>
+        <Text style={[s.contactName, { color: t.contactText }]}>{info.nickname}</Text>
+        <Text style={{ color: t.contactSub, fontSize: 12 }}>
+          {isOwner ? '👑 Создатель' : isAdmin ? '⭐ Администратор' : 'Участник'}
+        </Text>
+      </View>
+      {amAdmin && !isSelf && !isOwner && (
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            style={[s.memberActionBtn, { backgroundColor: isAdmin ? '#888' : '#ff9500' }]}
+            onPress={onToggleAdmin}
+          >
+            <Text style={{ color: 'white', fontSize: 11 }}>{isAdmin ? 'Разжаловать' : 'Админ'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.memberActionBtn, { backgroundColor: '#ff3b30' }]}
+            onPress={onRemove}
+          >
+            <Text style={{ color: 'white', fontSize: 11 }}>Удалить</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   )
 }
@@ -837,8 +1329,11 @@ const s = StyleSheet.create({
   message: { maxWidth: '70%', padding: 10, borderRadius: 12, margin: 4 },
   msgImage: { width: 200, height: 200, borderRadius: 8 },
   msgNick: { fontWeight: 'bold', fontSize: 12, marginBottom: 4 },
-  time: { fontSize: 11, opacity: 0.6, marginTop: 2 },
+  msgMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  editedLabel: { fontSize: 11, opacity: 0.6, fontStyle: 'italic' },
+  time: { fontSize: 11, opacity: 0.6 },
   inputArea: { flexDirection: 'row', padding: 10, gap: 6, alignItems: 'center' },
+  editRow: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', borderWidth: 1, borderRadius: 12, padding: 8 },
   iconBtn: { width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
   msgInput: { flex: 1, borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, fontSize: 16, height: 44 },
   sendBtn: { width: 45, height: 45, borderRadius: 23, backgroundColor: '#0088cc', justifyContent: 'center', alignItems: 'center' },
@@ -882,4 +1377,8 @@ const s = StyleSheet.create({
   recTime: { color: 'red', fontWeight: 'bold', fontSize: 14, minWidth: 36 },
   recTrack: { flex: 1, height: 4, backgroundColor: '#ccc', borderRadius: 2, overflow: 'hidden' },
   recFill: { height: 4, backgroundColor: 'red', borderRadius: 2 },
+  groupDescBar: { paddingHorizontal: 16, paddingVertical: 6 },
+  adminBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  memberRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1 },
+  memberActionBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
 })
