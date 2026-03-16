@@ -102,7 +102,7 @@ function MemberRow({ uid, t, isOwner, isAdminMember, isSelf, amAdmin, onToggleAd
       <View style={{flex:1, marginLeft:12}}>
         <Text style={{color:t.contactText,fontSize:15,fontWeight:'500'}}>{info.nickname}</Text>
         <Text style={{color:isOwner?t.favColor:isAdminMember?t.adminColor:t.contactSub,fontSize:12}}>
-          {isOwner ? '(*) Создатель' : isAdminMember ? '(^) Администратор' : '(.) Участник'}
+          {isOwner ? '♛ Создатель' : isAdminMember ? '✦ Администратор' : '· Участник'}
         </Text>
       </View>
       {amAdmin && !isSelf && !isOwner && (
@@ -291,7 +291,7 @@ export default function App() {
     const canEdit = isMine && item.type==='text'
     if (!canDelete && !canEdit) return
     const opts = []
-    if (canEdit) opts.push({label:'(e)  Редактировать',action:'edit'})
+    if (canEdit) opts.push({label:'✎  Редактировать',action:'edit'})
     if (canDelete) opts.push({label:'(x)  Удалить',action:'delete',danger:true})
     msgMenu(opts, opt => {
       if (opt.action==='edit') { setEditingMsg(item); setEditText(item.text) }
@@ -483,7 +483,7 @@ export default function App() {
           {item.type==='audio' ? (
             <TouchableOpacity style={s.audioRow} onPress={()=>playAudio(item.audioUrl||item.fileUrl)}>
               <View style={[s.playBtn,{backgroundColor:isMine?'#4caf84':t.tabActive}]}>
-                <Text style={{color:'#fff',fontSize:12,fontWeight:'700'}}>{'>>'}</Text>
+                <Text style={{color:'#fff',fontSize:12,fontWeight:'700'}}>▶</Text>
               </View>
               <View style={s.audioTrack}>
                 <View style={[s.audioFill,{backgroundColor:isMine?'#4caf84':t.tabActive,width:'55%'}]} />
@@ -497,7 +497,7 @@ export default function App() {
           ) : item.type==='file' ? (
             <TouchableOpacity onPress={()=>Linking.openURL(item.fileUrl)} style={s.fileRow}>
               <View style={[s.fileIcon,{backgroundColor:isMine?'#4caf84':t.tabActive}]}>
-                <Text style={{color:'#fff',fontSize:13,fontWeight:'700'}}>[F]</Text>
+                <Text style={{color:'#fff',fontSize:13,fontWeight:'700'}}>⎘</Text>
               </View>
               <View style={{flex:1}}>
                 <Text style={{color:isMine?t.msgMineText:t.msgOtherText,fontSize:14,fontWeight:'500'}} numberOfLines={2}>{item.text}</Text>
@@ -510,7 +510,7 @@ export default function App() {
           <View style={s.msgMeta}>
             {item.edited && <Text style={{color:isMine?t.msgMineTime:t.msgOtherTime,fontSize:11,fontStyle:'italic',marginRight:2}}>изм.</Text>}
             <Text style={{color:isMine?t.msgMineTime:t.msgOtherTime,fontSize:11}}>{timeStr}</Text>
-            {isMine && <Text style={{color:t.checkColor,fontSize:11,marginLeft:2}}>vv</Text>}
+            {isMine && <Text style={{color:t.checkColor,fontSize:11,marginLeft:2}}>✓✓</Text>}
           </View>
         </View>
       </TouchableOpacity>
@@ -527,18 +527,22 @@ export default function App() {
           <Text style={s.sidebarNick}>{userNick}</Text>
           <Text style={s.sidebarEmail}>{user?.email}</Text>
         </View>
+        <TouchableOpacity style={s.sidebarItem} onPress={()=>{closeSidebar();setScreen('contacts')}}>
+          <Text style={[s.sidebarIcon,{color:t.tabActive}]}>◱</Text>
+          <Text style={[s.sidebarItemText,{color:t.sidebarText}]}>Чаты</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={s.sidebarItem} onPress={()=>{closeSidebar();setScreen('favorites')}}>
-          <Text style={[s.sidebarIcon,{color:t.favColor}]}>(*)</Text>
+          <Text style={[s.sidebarIcon,{color:t.favColor}]}>★</Text>
           <Text style={[s.sidebarItemText,{color:t.sidebarText}]}>Избранное</Text>
         </TouchableOpacity>
         <View style={[s.sidebarDivider,{backgroundColor:t.divider}]} />
         <TouchableOpacity style={s.sidebarItem} onPress={()=>{closeSidebar();setScreen('settings')}}>
-          <Text style={[s.sidebarIcon,{color:t.contactSub}]}>[=]</Text>
+          <Text style={[s.sidebarIcon,{color:t.contactSub}]}>⚙</Text>
           <Text style={[s.sidebarItemText,{color:t.sidebarText}]}>Настройки</Text>
         </TouchableOpacity>
         <View style={[s.sidebarDivider,{backgroundColor:t.divider}]} />
         <TouchableOpacity style={s.sidebarItem} onPress={()=>{closeSidebar();auth.signOut()}}>
-          <Text style={[s.sidebarIcon,{color:t.danger}]}>{'->'}</Text>
+          <Text style={[s.sidebarIcon,{color:t.danger}]}>↪</Text>
           <Text style={[s.sidebarItemText,{color:t.danger}]}>Выйти</Text>
         </TouchableOpacity>
       </Animated.View>
@@ -550,7 +554,7 @@ export default function App() {
     <View style={[s.auth,{backgroundColor:t.authBg}]}>
       <View style={{alignItems:'center',marginBottom:36}}>
         <View style={{width:88,height:88,borderRadius:44,backgroundColor:t.header,justifyContent:'center',alignItems:'center',marginBottom:14}}>
-          <Text style={{fontSize:38,color:'#fff'}}>(F)</Text>
+          <Text style={{fontSize:38,color:'#fff'}}>✉</Text>
         </View>
         <Text style={{fontSize:28,fontWeight:'800',color:t.title}}>FireMes</Text>
         <Text style={{color:t.contactSub,fontSize:14,marginTop:4}}>Войди или создай аккаунт</Text>
@@ -587,13 +591,18 @@ export default function App() {
   if (screen==='settings') return (
     <View style={[s.container,{backgroundColor:t.settingsBg}]}>
       <View style={[s.header,{backgroundColor:t.header}]}>
-        <TouchableOpacity onPress={openSidebar}><Text style={{fontSize:18,fontWeight:'700',color:'#fff'}}>(=)</Text></TouchableOpacity>
-        <Text style={{fontSize:18,fontWeight:'700',color:'#fff',flex:1,marginLeft:14}}>Настройки</Text>
+        <TouchableOpacity onPress={()=>setScreen('contacts')} style={{marginRight:8}}>
+          <Text style={{fontSize:18,fontWeight:'700',color:'#fff'}}>←</Text>
+        </TouchableOpacity>
+        <Text style={{fontSize:18,fontWeight:'700',color:'#fff',flex:1}}>Настройки</Text>
+        <TouchableOpacity onPress={openSidebar}>
+          <Text style={{fontSize:20,color:'#fff'}}>☰</Text>
+        </TouchableOpacity>
       </View>
       <View style={[{flexDirection:'row',alignItems:'center',padding:20},t.settingsItem&&{backgroundColor:t.settingsItem}]}>
         <View style={{position:'relative'}}>
           <Avatar url={userAvatar} letter={userNick?.[0]||'?'} size={80} onPress={changeAvatar} />
-          <View style={[s.editBadge,{backgroundColor:t.header}]}><Text style={{color:'#fff',fontSize:11}}>(e)</Text></View>
+          <View style={[s.editBadge,{backgroundColor:t.header}]}><Text style={{color:'#fff',fontSize:11}}>✎</Text></View>
         </View>
         <View style={{marginLeft:16}}>
           <Text style={{color:t.contactText,fontSize:18,fontWeight:'700'}}>{userNick}</Text>
@@ -614,14 +623,14 @@ export default function App() {
       <View style={[s.settingsSection,{backgroundColor:t.settingsItem,marginTop:10}]}>
         <Text style={[s.secLabel,{color:t.contactSub}]}>ОФОРМЛЕНИЕ</Text>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-          <Text style={{color:t.contactText,fontSize:16}}>(/) Тёмная тема</Text>
+          <Text style={{color:t.contactText,fontSize:16}}>◑ Тёмная тема</Text>
           <Switch value={isDark} onValueChange={setIsDark} trackColor={{false:'#ccc',true:t.header}} thumbColor="#fff" />
         </View>
       </View>
       <View style={[s.settingsSection,{backgroundColor:t.settingsItem,marginTop:10}]}>
         <Text style={[s.secLabel,{color:t.contactSub}]}>УВЕДОМЛЕНИЯ</Text>
         <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}>
-          <Text style={{color:t.contactText,fontSize:16}}>(!) Уведомления</Text>
+          <Text style={{color:t.contactText,fontSize:16}}>◎ Уведомления</Text>
           <Switch value={notifications} onValueChange={setNotifications} trackColor={{false:'#ccc',true:t.header}} thumbColor="#fff" />
         </View>
       </View>
@@ -645,7 +654,7 @@ export default function App() {
         {/* Header */}
         <View style={[s.header,{backgroundColor:t.header}]}>
           <TouchableOpacity onPress={()=>{setScreen('contacts');setPreview(null);setEditingMsg(null)}} style={{marginRight:8}}>
-            <Text style={{fontSize:18,fontWeight:'700',color:'#fff'}}>{'<-'}</Text>
+            <Text style={{fontSize:18,fontWeight:'700',color:'#fff'}}>←</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={{flex:1,flexDirection:'row',alignItems:'center',gap:10}}
@@ -656,18 +665,18 @@ export default function App() {
             <View>
               <Text style={{fontSize:17,fontWeight:'700',color:'#fff'}}>{title}</Text>
               <Text style={{color:t.headerSub,fontSize:12}}>
-                {isFav?'только для тебя':isGroup?`${Object.keys(gData?.members||{}).length} участников`:'в сети'}
+                {isFav?'только для тебя':isGroup?`${Object.keys(gData?.members||{}).length} участников`:''}
               </Text>
             </View>
           </TouchableOpacity>
           {isGroup && amGroupAdmin && (
             <TouchableOpacity onPress={openEditGroup} style={{padding:6}}>
-              <Text style={{color:'#fff',fontSize:16}}>(e)</Text>
+              <Text style={{color:'#fff',fontSize:16}}>✎</Text>
             </TouchableOpacity>
           )}
           {isGroup && (
             <TouchableOpacity onPress={leaveGroup} style={{padding:6}}>
-              <Text style={{color:'rgba(255,255,255,0.7)',fontSize:16}}>(→)</Text>
+              <Text style={{color:'rgba(255,255,255,0.7)',fontSize:16}}>⇤</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -690,7 +699,7 @@ export default function App() {
           ListEmptyComponent={isFav ? (
             <View style={{alignItems:'center',marginTop:80,paddingHorizontal:40}}>
               <View style={{width:80,height:80,borderRadius:40,backgroundColor:t.favColor,justifyContent:'center',alignItems:'center',marginBottom:18}}>
-                <Text style={{fontSize:34,color:'#fff'}}>(*)</Text>
+                <Text style={{fontSize:34,color:'#fff'}}>★</Text>
               </View>
               <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:10}}>Избранное</Text>
               <Text style={{color:t.contactSub,textAlign:'center',fontSize:14,lineHeight:21}}>
@@ -713,13 +722,13 @@ export default function App() {
               {preview.type==='image'
                 ? <Image source={{uri:preview.uri}} style={s.previewImg} contentFit="cover" />
                 : <View style={{width:54,height:54,borderRadius:8,backgroundColor:t.header+'22',justifyContent:'center',alignItems:'center'}}>
-                    <Text style={{fontSize:20,color:t.header}}>{preview.type==='audio'?'(mic)':'(doc)'}</Text>
+                    <Text style={{fontSize:20,color:t.header}}>{preview.type==='audio'?'♪':'⎘'}</Text>
                   </View>
               }
               <Text style={{color:t.contactText,flex:1,fontSize:13}} numberOfLines={2}>{preview.name}</Text>
             </View>
             <TouchableOpacity onPress={()=>setPreview(null)} style={{padding:6}}>
-              <Text style={{color:t.contactSub,fontSize:20}}>(x)</Text>
+              <Text style={{color:t.contactSub,fontSize:18}}>✕</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -732,14 +741,14 @@ export default function App() {
               <Text style={s.recTime}>{Math.floor(recordingTime/60)}:{String(recordingTime%60).padStart(2,'0')}</Text>
               <View style={s.recTrack}><View style={[s.recFill,{width:`${Math.min(recordingTime*3,100)}%`}]} /></View>
               <TouchableOpacity onPress={stopRecording} style={[s.sendBtn,{backgroundColor:'#ff3b30'}]}>
-                <Text style={{color:'#fff',fontSize:14,fontWeight:'700'}}>[.]</Text>
+                <Text style={{color:'#fff',fontSize:14,fontWeight:'700'}}>■</Text>
               </TouchableOpacity>
             </View>
           ) : editingMsg ? (
             <View style={[s.editBar,{borderTopColor:t.editBarColor}]}>
               <View style={{width:3,borderRadius:2,backgroundColor:t.editBarColor,alignSelf:'stretch',minHeight:36,marginRight:8}} />
               <View style={{flex:1}}>
-                <Text style={{color:t.editBarColor,fontSize:12,fontWeight:'600',marginBottom:3}}>(e) Редактирование</Text>
+                <Text style={{color:t.editBarColor,fontSize:12,fontWeight:'600',marginBottom:3}}>✎ Редактирование</Text>
                 <TextInput style={[s.msgInput,{borderColor:t.inputBorder,backgroundColor:t.input,color:t.inputText}]}
                   value={editText} onChangeText={setEditText} autoFocus placeholder="Текст..." placeholderTextColor={t.placeholder} />
               </View>
@@ -753,10 +762,10 @@ export default function App() {
           ) : (
             <View style={{flexDirection:'row',alignItems:'center',gap:4}}>
               <TouchableOpacity onPress={pickFile} style={s.iconBtn}>
-                <Text style={{fontSize:20,color:t.contactSub}}>[f]</Text>
+                <Text style={{fontSize:20,color:t.contactSub}}>⊕</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={startRecording} style={s.iconBtn}>
-                <Text style={{fontSize:20,color:t.contactSub}}>(o)</Text>
+                <Text style={{fontSize:20,color:t.contactSub}}>⏺</Text>
               </TouchableOpacity>
               {!preview ? (
                 <TextInput style={[s.msgInput,{borderColor:t.inputBorder,backgroundColor:t.input,color:t.inputText}]}
@@ -780,7 +789,7 @@ export default function App() {
                 {amGroupAdmin && (
                   <TouchableOpacity style={[{backgroundColor:t.header,paddingHorizontal:12,paddingVertical:8,borderRadius:8}]}
                     onPress={()=>{setGroupMembersModal(false);setAddMemberModal(true)}}>
-                    <Text style={{color:'#fff',fontWeight:'700',fontSize:13}}>(+) Добавить</Text>
+                    <Text style={{color:'#fff',fontWeight:'700',fontSize:13}}>＋ Добавить</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -807,7 +816,7 @@ export default function App() {
         <Modal visible={addMemberModal} transparent animationType="slide">
           <View style={s.modalOverlay}>
             <View style={[s.modal,{backgroundColor:t.modalBg}]}>
-              <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>(+) Добавить участника</Text>
+              <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>＋ Добавить участника</Text>
               <TextInput style={[s.inp,{backgroundColor:t.input,borderColor:t.inputBorder,color:t.inputText}]}
                 placeholder="Никнейм" placeholderTextColor={t.placeholder} value={addMemberNick} onChangeText={setAddMemberNick} />
               <TouchableOpacity style={[s.btn,{backgroundColor:t.header}]} onPress={searchUserForGroup}>
@@ -834,11 +843,11 @@ export default function App() {
         <Modal visible={editGroupModal} transparent animationType="slide">
           <View style={s.modalOverlay}>
             <View style={[s.modal,{backgroundColor:t.modalBg}]}>
-              <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>(e) Редактировать группу</Text>
+              <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>✎ Редактировать группу</Text>
               <View style={{alignItems:'center',marginBottom:18}}>
                 <TouchableOpacity onPress={pickGroupAvatar} style={{position:'relative'}}>
                   <Avatar url={editGroupAvatar} letter={editGroupName?.[0]||'?'} size={76} />
-                  <View style={[s.editBadge,{backgroundColor:t.header}]}><Text style={{color:'#fff',fontSize:11}}>(e)</Text></View>
+                  <View style={[s.editBadge,{backgroundColor:t.header}]}><Text style={{color:'#fff',fontSize:11}}>✎</Text></View>
                 </TouchableOpacity>
                 {editGroupAvatarUploading && <Text style={{color:t.contactSub,fontSize:12,marginTop:6}}>[...] Загрузка</Text>}
               </View>
@@ -865,11 +874,11 @@ export default function App() {
     <View style={[s.container,{backgroundColor:t.bg}]}>
       <View style={[s.header,{backgroundColor:t.header}]}>
         <TouchableOpacity onPress={openSidebar}>
-          <Text style={{fontSize:18,fontWeight:'700',color:'#fff'}}>(=)</Text>
+          <Text style={{fontSize:20,color:'#fff'}}>☰</Text>
         </TouchableOpacity>
         <Text style={{fontSize:18,fontWeight:'700',color:'#fff',flex:1,marginLeft:14}}>FireMes</Text>
         <TouchableOpacity onPress={()=>setScreen('favorites')} style={{marginRight:10}}>
-          <Text style={{fontSize:20,color:t.favColor}}>(*)</Text>
+          <Text style={{fontSize:20,color:t.favColor}}>★</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={()=>tab==='chats'?setAddModal(true):setCreateGroupModal(true)}>
           <Text style={{fontSize:26,color:'#fff',fontWeight:'300',lineHeight:28}}>+</Text>
@@ -902,7 +911,7 @@ export default function App() {
               </View>
             </TouchableOpacity>
           )}
-          ListEmptyComponent={<Text style={{color:t.contactSub,textAlign:'center',marginTop:48,fontSize:15}}>Нажми (+) чтобы добавить контакт</Text>}
+          ListEmptyComponent={<Text style={{color:t.contactSub,textAlign:'center',marginTop:48,fontSize:15}}>Нажми ＋ чтобы добавить контакт</Text>}
         />
       ) : (
         <FlatList
@@ -929,7 +938,7 @@ export default function App() {
               </View>
             </TouchableOpacity>
           )}
-          ListEmptyComponent={<Text style={{color:t.contactSub,textAlign:'center',marginTop:48,fontSize:15}}>Нажми (+) чтобы создать группу</Text>}
+          ListEmptyComponent={<Text style={{color:t.contactSub,textAlign:'center',marginTop:48,fontSize:15}}>Нажми ＋ чтобы создать группу</Text>}
         />
       )}
 
@@ -937,7 +946,7 @@ export default function App() {
       <Modal visible={addModal} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.modal,{backgroundColor:t.modalBg}]}>
-            <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>(+) Найти пользователя</Text>
+            <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>⌕ Найти пользователя</Text>
             <TextInput style={[s.inp,{backgroundColor:t.input,borderColor:t.inputBorder,color:t.inputText}]}
               placeholder="Никнейм" placeholderTextColor={t.placeholder} value={searchNick} onChangeText={setSearchNick} />
             <TouchableOpacity style={[s.btn,{backgroundColor:t.header}]} onPress={searchUser}>
@@ -964,7 +973,7 @@ export default function App() {
       <Modal visible={createGroupModal} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.modal,{backgroundColor:t.modalBg}]}>
-            <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>(+) Создать группу</Text>
+            <Text style={{color:t.contactText,fontSize:20,fontWeight:'700',marginBottom:14}}>⊞ Создать группу</Text>
             <TextInput style={[s.inp,{backgroundColor:t.input,borderColor:t.inputBorder,color:t.inputText}]}
               placeholder="Название группы" placeholderTextColor={t.placeholder} value={groupName} onChangeText={setGroupName} />
             <TextInput style={[s.inp,{backgroundColor:t.input,borderColor:t.inputBorder,color:t.inputText}]}
@@ -979,7 +988,7 @@ export default function App() {
                     onPress={()=>setGroupMembersForCreate(p=>sel?p.filter(x=>x!==c.uid):[...p,c.uid])}>
                     <Avatar url={c.avatar} letter={c.nickname[0]} size={38} />
                     <Text style={{color:t.contactText,flex:1,marginLeft:12,fontSize:15,fontWeight:'500'}}>{c.nickname}</Text>
-                    <Text style={{fontSize:16,color:t.tabActive}}>{sel?'(v)':''}</Text>
+                    <Text style={{fontSize:16,color:t.tabActive}}>{sel?'✓':''}</Text>
                   </TouchableOpacity>
                 )
               })}
