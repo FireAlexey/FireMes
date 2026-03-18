@@ -34,6 +34,7 @@ jobs:
         run: |
           chmod +x ./node_modules/.bin/expo
           ./node_modules/.bin/expo export --platform web
+          node fix-paths.js
 
       - name: Fix asset paths for GitHub Pages subdirectory
         run: |
