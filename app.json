@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "FireMes",
-    "slug": "FireMes",
+    "slug": "firemes",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
