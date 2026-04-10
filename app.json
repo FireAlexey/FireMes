@@ -24,8 +24,10 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "bundler": "metro"
-    },
+  "bundler": "metro",
+  "output": "single",
+  "baseUrl": "/FireMes"
+},
     "plugins": [
       "expo-router",
       [
